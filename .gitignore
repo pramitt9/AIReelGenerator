@@ -1,0 +1,5 @@
+config.py
+project
+.env
+__pycache__/
+*.pyc
