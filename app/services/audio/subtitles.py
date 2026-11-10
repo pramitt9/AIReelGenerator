@@ -1,21 +1,57 @@
 
+import subprocess
+import numpy as np
 from faster_whisper import WhisperModel
 
 
-def generate_word_timestamps(audio_path: str) -> dict:
-    """
-    Transcribe an audio file and return word-level timestamps.
-    Uses CPU with int8 quantization to keep resource usage manageable.
-    """
+_model = None
 
-    model = WhisperModel(
-        "small",
-        device="cpu",
-        compute_type="int8"
+
+def get_model():
+    """Load Whisper once and reuse it."""
+    global _model
+
+    if _model is None:
+        _model = WhisperModel(
+            "small",
+            device="cpu",
+            compute_type="int8"
+        )
+
+    return _model
+
+
+def load_audio(audio_path: str) -> np.ndarray:
+    """Decode audio using FFmpeg instead of PyAV."""
+
+    command = [
+        "ffmpeg",
+        "-i", audio_path,
+        "-f", "s16le",
+        "-ac", "1",
+        "-ar", "16000",
+        "-acodec", "pcm_s16le",
+        "-"
+    ]
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True
     )
 
+    audio = np.frombuffer(result.stdout, dtype=np.int16)
+
+    return audio.astype(np.float32) / 32768.0
+
+
+def generate_word_timestamps(audio_path: str) -> dict:
+    audio = load_audio(audio_path)
+    model = get_model()
+
     segments, info = model.transcribe(
-        audio_path,
+        audio,
         word_timestamps=True,
         vad_filter=True
     )
@@ -32,7 +68,7 @@ def generate_word_timestamps(audio_path: str) -> dict:
                 })
 
     if not words:
-        raise ValueError("No speech detected in the audio file.")
+        raise ValueError("No speech detected in the audio.")
 
     return {
         "language": info.language,
