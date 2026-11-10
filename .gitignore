@@ -1,5 +1,32 @@
-config.py
-project
+
+# Environment and secrets
 .env
+.venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Flask instance and database
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated media
+storage/
+user_uploads/
+*.mp4
+*.mp3
+*.wav
+
+# IDE
+.vscode/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
