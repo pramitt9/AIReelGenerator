@@ -30,3 +30,21 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# User-generated content
+user_uploads/
+storage/
+static/reels/
+
+# Local database and runtime files
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment and Python
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
