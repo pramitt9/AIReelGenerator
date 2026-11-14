@@ -6,7 +6,10 @@ from app.models import Scene
 
 from app.services.video_search.pixabay import search_videos
 from app.services.video_search.asset_selector import select_best_video
-from app.services.storage.media_storage import download_video
+from app.services.storage.media_storage import (
+    download_video,
+    delete_video
+)
 
 
 def clear_scene_asset(scene: Scene) -> None:
@@ -21,6 +24,19 @@ def clear_scene_asset(scene: Scene) -> None:
     scene.height = None
 
 
+def cleanup_old_asset(asset_path: str, project_id: int) -> None:
+    """Safely delete an old asset without interrupting processing."""
+
+    if not asset_path:
+        return
+
+    try:
+        delete_video(asset_path, project_id)
+    except Exception:
+        # Cleanup failure should not invalidate scene processing.
+        pass
+
+
 def process_storyboard(project_id: int, storyboard: dict) -> dict:
     """
     Process storyboard scenes.
@@ -30,6 +46,9 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
     Changes to narration, duration or camera motion do not require
     downloading new footage.
+
+    Assets are stored using stable scene IDs, so reordering scenes
+    cannot cause footage files to overwrite one another.
     """
 
     if not isinstance(storyboard, dict):
@@ -82,7 +101,6 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             "camera_motion", "none"
         )
 
-        # Validate and normalize inputs.
         if not isinstance(narration, str):
             narration = ""
 
@@ -108,23 +126,22 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             })
             continue
 
+        old_asset_path = None
+
         try:
-            # Retrieve existing scene.
             scene = Scene.query.filter_by(
                 project_id=project_id,
                 scene_number=scene_number
             ).first()
 
             if scene:
-                # Check whether the visual requirements changed
-                # before overwriting the existing values.
                 visual_changed = (
                     scene.visual_description != visual_description
                     or scene.visual_type != visual_type
                 )
 
-                # Invalidate old footage if visual requirements changed.
                 if visual_changed:
+                    old_asset_path = scene.asset_path
                     clear_scene_asset(scene)
 
                 scene.narration = narration
@@ -147,9 +164,10 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
                 db.session.add(scene)
 
+            # Commit first so newly created scenes receive an ID.
             db.session.commit()
 
-            # Reuse existing footage only if it still exists.
+            # Reuse existing footage if its file still exists.
             if scene.asset_path and os.path.isfile(scene.asset_path):
                 scene.status = "completed"
                 scene.error_message = None
@@ -165,13 +183,15 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
                 continue
 
-            # AI-generated visuals require a separate provider.
+            # AI-generated visuals need a separate provider.
             if visual_type == "ai_generated":
                 scene.status = "needs_visual"
                 scene.error_message = (
                     "AI visual generation required."
                 )
                 db.session.commit()
+
+                cleanup_old_asset(old_asset_path, project_id)
 
                 summary["needs_visual"] += 1
                 summary["results"].append({
@@ -198,6 +218,8 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 )
                 db.session.commit()
 
+                cleanup_old_asset(old_asset_path, project_id)
+
                 summary["needs_visual"] += 1
                 summary["results"].append({
                     "scene_number": scene_number,
@@ -220,6 +242,8 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 )
                 db.session.commit()
 
+                cleanup_old_asset(old_asset_path, project_id)
+
                 summary["needs_visual"] += 1
                 summary["results"].append({
                     "scene_number": scene_number,
@@ -228,11 +252,11 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
                 continue
 
-            # Download selected footage.
+            # Download using the stable database scene ID.
             asset_path = download_video(
                 best["url"],
                 project_id=project_id,
-                scene_number=scene_number
+                scene_id=scene.id
             )
 
             if not asset_path or not os.path.isfile(asset_path):
@@ -253,6 +277,11 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
             db.session.commit()
 
+            # The stable scene-ID path may have been atomically
+            # replaced by the new download. Never delete that path.
+            if old_asset_path and old_asset_path != asset_path:
+                cleanup_old_asset(old_asset_path, project_id)
+
             summary["completed"] += 1
             summary["results"].append({
                 "scene_number": scene_number,
@@ -265,7 +294,6 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         except Exception as exc:
             db.session.rollback()
 
-            # Persist failure without stopping other scenes.
             try:
                 failed_scene = Scene.query.filter_by(
                     project_id=project_id,

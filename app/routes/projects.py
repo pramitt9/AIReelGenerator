@@ -10,6 +10,7 @@ from app.models.scene import Scene
 
 from app.services.ai.script_generator import generate_script
 from app.services.generation.generation_pipeline import generate_project_video
+from app.services.storage.media_storage import delete_video
 
 
 projects = Blueprint(
@@ -348,6 +349,15 @@ def generate_project_script(project_id):
 
         new_scenes.sort(key=lambda scene: scene.scene_number)
 
+        # Collect old video assets before replacing scene records.
+        old_asset_paths = [
+            scene.asset_path
+            for scene in Scene.query.filter_by(
+                project_id=project.id
+            ).all()
+            if scene.asset_path
+        ]
+
         # Replace existing database scenes.
         Scene.query.filter_by(
             project_id=project.id
@@ -364,6 +374,16 @@ def generate_project_script(project_id):
 
         db.session.add_all(new_scenes)
         db.session.commit()
+
+        # Clean up old footage after successful storyboard replacement.
+        for asset_path in old_asset_paths:
+            try:
+                delete_video(asset_path, project.id)
+            except Exception:
+                current_app.logger.exception(
+                    "Could not delete old storyboard asset: %s",
+                    asset_path
+                )
 
         return jsonify({
             "message": "Storyboard generated successfully",
@@ -682,6 +702,9 @@ def delete_scene(project_id, scene_id):
     if not scene:
         return jsonify({"error": "Scene not found"}), 404
 
+    # Keep the asset path before deleting the database record.
+    asset_path = scene.asset_path
+
     try:
         scenes = (
             Scene.query
@@ -698,22 +721,11 @@ def delete_scene(project_id, scene_id):
         # Renumber remaining scenes.
         renumber_scenes(scenes)
 
-        # Keep the saved storyboard synchronized.
+        # Synchronize the saved storyboard.
         sync_storyboard_scenes(project, scenes)
 
+        # Commit database changes before deleting the physical file.
         db.session.commit()
-
-        return jsonify({
-            "message": "Scene deleted successfully.",
-            "remaining_scene_count": len(scenes),
-            "scenes": [
-                {
-                    "id": item.id,
-                    **scene_to_dict(item)
-                }
-                for item in scenes
-            ]
-        }), 200
 
     except Exception:
         db.session.rollback()
@@ -726,6 +738,29 @@ def delete_scene(project_id, scene_id):
         return jsonify({
             "error": "Could not delete scene."
         }), 500
+
+    # File cleanup happens only after successful database deletion.
+    if asset_path:
+        try:
+            delete_video(asset_path, project_id)
+        except Exception:
+            current_app.logger.exception(
+                "Could not delete video asset for scene %s",
+                scene_id
+            )
+
+    return jsonify({
+        "message": "Scene deleted successfully.",
+        "remaining_scene_count": len(scenes),
+        "scenes": [
+            {
+                "id": item.id,
+                **scene_to_dict(item)
+            }
+            for item in scenes
+        ]
+    }), 200
+
 
 
 # ---------------------------------------------------------
