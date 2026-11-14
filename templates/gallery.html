@@ -1,19 +1,209 @@
+
 {% extends "base.html" %}
 
-{% block title %}Gallery - AI Reel Generator{% endblock %}
+{% block title %}My Gallery | VidSnapAI{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/gallery.css') }}">
+<style>
+    .gallery-container {
+        max-width: 1100px;
+        margin: auto;
+        padding-top: 45px;
+        padding-bottom: 60px;
+    }
+
+    .gallery-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 30px;
+    }
+
+    .gallery-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+        gap: 22px;
+    }
+
+    .project-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 15px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .project-preview {
+        aspect-ratio: 9 / 16;
+        max-height: 300px;
+        background: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+    .project-preview video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+
+    .project-placeholder {
+        color: var(--text-secondary);
+        text-align: center;
+        padding: 25px;
+    }
+
+    .project-details {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+    }
+
+    .project-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        overflow-wrap: anywhere;
+    }
+
+    .project-topic {
+        color: var(--text-secondary);
+        font-size: .9rem;
+        margin-bottom: 15px;
+        overflow-wrap: anywhere;
+    }
+
+    .project-meta {
+        color: var(--text-secondary);
+        font-size: .8rem;
+        margin-bottom: 15px;
+    }
+
+    .project-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: auto;
+    }
+
+    .project-actions .btn {
+        flex: 1;
+    }
+
+    .empty-gallery {
+        text-align: center;
+        padding: 65px 20px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 15px;
+    }
+
+    .empty-gallery i {
+        font-size: 2.5rem;
+        color: var(--accent);
+        margin-bottom: 18px;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="container gallery-container">
-    <h1 class="gallery-title">Reel Gallery</h1>
-    <div class="gallery-grid">
-        {% for reel in reels %}
-            <video src="/static/reels/{{reel}}" controls></video>
-        {% endfor %}
-        
+
+    <div class="gallery-header">
+        <div>
+            <h1 class="fw-bold mb-2">My Gallery</h1>
+            <p class="text-muted mb-0">
+                All your VidSnapAI projects in one place.
+            </p>
+        </div>
+
+        <a href="{{ url_for('main.create_page') }}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>Create New Reel
+        </a>
     </div>
+
+    {% if projects %}
+        <div class="gallery-grid">
+            {% for project in projects %}
+                <article class="project-card">
+
+                    <div class="project-preview">
+                        {% if project.status == "completed" %}
+                            <video
+                                controls
+                                preload="none"
+                                playsinline
+                                src="{{ url_for('main.preview_video', project_id=project.id) }}"
+                            ></video>
+                        {% else %}
+                            <div class="project-placeholder">
+                                <i class="fas fa-film fa-2x mb-3"></i>
+                                <p class="mb-0">Video not generated yet</p>
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="project-details">
+                        <h5 class="project-title">{{ project.title }}</h5>
+
+                        {% if project.topic %}
+                            <p class="project-topic">{{ project.topic }}</p>
+                        {% endif %}
+
+                        <div class="project-meta">
+                            <span class="badge bg-secondary">
+                                {{ project.status|capitalize }}
+                            </span>
+
+                            {% if project.created_at %}
+                                <div class="mt-2">
+                                    <i class="far fa-calendar me-1"></i>
+                                    {{ project.created_at.strftime('%d %b %Y') }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="project-actions">
+                            <a
+                                href="{{ url_for('main.storyboard_page', project_id=project.id) }}"
+                                class="btn btn-outline-primary"
+                            >
+                                <i class="fas fa-edit me-1"></i>Open
+                            </a>
+
+                            {% if project.status == "completed" %}
+                                <a
+                                    href="{{ url_for('main.download_video', project_id=project.id) }}"
+                                    class="btn btn-primary"
+                                >
+                                    <i class="fas fa-download me-1"></i>Download
+                                </a>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                </article>
+            {% endfor %}
+        </div>
+
+    {% else %}
+        <div class="empty-gallery">
+            <i class="fas fa-photo-film"></i>
+            <h4 class="fw-bold">Your gallery is empty</h4>
+            <p class="text-muted">
+                Create your first reel and it will appear here.
+            </p>
+            <a href="{{ url_for('main.create_page') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>Create Your First Reel
+            </a>
+        </div>
+    {% endif %}
+
 </div>
-{% endblock %} 
+{% endblock %}

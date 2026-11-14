@@ -6,7 +6,6 @@
 {% block content %}
 <div class="container py-5">
 
-    <!-- Header -->
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-5 gap-3">
         <div>
             <h1 class="fw-bold mb-2">Your Creative Studio</h1>
@@ -21,7 +20,6 @@
         </a>
     </div>
 
-    <!-- Statistics -->
     <div class="row g-4 mb-5">
         <div class="col-md-4">
             <div class="card border-0 shadow-sm h-100">
@@ -55,7 +53,6 @@
         </div>
     </div>
 
-    <!-- Features -->
     <div class="row g-4 mb-5">
         <div class="col-md-4">
             <div class="card border-0 shadow-sm h-100">
@@ -75,7 +72,7 @@
                     <div class="text-muted mb-2">Automated Production</div>
                     <h5 class="fw-bold">Footage, voice and music</h5>
                     <p class="text-muted mb-0">
-                        Bring scenes together with AI narration and visuals.
+                        Bring scenes together with narration and visuals.
                     </p>
                 </div>
             </div>
@@ -94,7 +91,6 @@
         </div>
     </div>
 
-    <!-- Recent Projects -->
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h3 class="fw-bold mb-0">Recent Projects</h3>
         <a href="{{ url_for('main.gallery') }}" class="text-decoration-none">
@@ -103,30 +99,70 @@
     </div>
 
     {% if projects %}
-        <div class="row g-3">
+        <div class="row g-4">
             {% for project in projects %}
                 <div class="col-md-6 col-lg-4">
-                    <div class="card border-0 shadow-sm h-100">
-                        <div class="card-body p-4">
+                    <div class="card border-0 shadow-sm h-100 overflow-hidden">
+
+                        {% if project.status == 'completed' %}
+                            <div style="background:#111;">
+                                <video
+                                    controls
+                                    playsinline
+                                    preload="none"
+                                    style="width:100%;max-height:260px;object-fit:contain;"
+                                    src="{{ url_for('main.preview_video', project_id=project.id) }}"
+                                ></video>
+                            </div>
+                        {% else %}
+                            <div class="text-center py-5 bg-light">
+                                <i class="fas fa-film fa-2x text-muted"></i>
+                                <p class="text-muted small mt-2 mb-0">
+                                    Video not generated yet
+                                </p>
+                            </div>
+                        {% endif %}
+
+                        <div class="card-body p-4 d-flex flex-column">
                             <h5 class="fw-bold">{{ project.title }}</h5>
 
-                            <p class="text-muted small mb-3">
-                                {{ project.topic }}
-                            </p>
-
-                            {% if project.status == 'completed' %}
-                                <span class="badge bg-success">Completed</span>
-                            {% elif project.status == 'processing' %}
-                                <span class="badge bg-primary">Processing</span>
-                            {% elif project.status == 'failed' %}
-                                <span class="badge bg-danger">Failed</span>
-                            {% else %}
-                                <span class="badge bg-secondary">Draft</span>
+                            {% if project.topic %}
+                                <p class="text-muted small mb-3">
+                                    {{ project.topic }}
+                                </p>
                             {% endif %}
 
-                            <p class="text-muted small mt-3 mb-0">
+                            {% if project.status == 'completed' %}
+                                <span class="badge bg-success align-self-start">Completed</span>
+                            {% elif project.status == 'processing' %}
+                                <span class="badge bg-primary align-self-start">Processing</span>
+                            {% elif project.status == 'failed' %}
+                                <span class="badge bg-danger align-self-start">Failed</span>
+                            {% else %}
+                                <span class="badge bg-secondary align-self-start">Draft</span>
+                            {% endif %}
+
+                            <p class="text-muted small mt-3">
                                 Created: {{ project.created_at.strftime('%d %b %Y') }}
                             </p>
+
+                            <div class="d-flex flex-wrap gap-2 mt-auto">
+                                <a
+                                    href="{{ url_for('main.storyboard_page', project_id=project.id) }}"
+                                    class="btn btn-outline-primary flex-fill"
+                                >
+                                    <i class="fas fa-edit me-1"></i>Open
+                                </a>
+
+                                {% if project.status == 'completed' %}
+                                    <a
+                                        href="{{ url_for('main.download_video', project_id=project.id) }}"
+                                        class="btn btn-primary flex-fill"
+                                    >
+                                        <i class="fas fa-download me-1"></i>Download
+                                    </a>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 </div>
