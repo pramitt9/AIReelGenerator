@@ -13,7 +13,7 @@ instance/
 *.sqlite3
 
 # Generated media
-storage/
+/storage/
 user_uploads/
 *.mp4
 *.mp3
