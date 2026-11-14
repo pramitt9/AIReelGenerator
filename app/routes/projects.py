@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 import json
 from app.services.ai.script_generator import generate_script
+from app.services.generation.generation_pipeline import generate_project_video
+from app.models import GenerationJob
 
 from app.extensions import db
 from app.models import Project
@@ -159,3 +161,46 @@ def generate_project_script(project_id):
         return jsonify({
             "error": "Script generation failed. Please try again."
         }), 502
+
+    
+@projects.route("/<int:project_id>/generate", methods=["POST"])
+@login_required
+def generate_project(project_id):
+
+    project = Project.query.filter_by(
+        id=project_id,
+        user_id=current_user.id
+    ).first()
+
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Prevent duplicate simultaneous generations.
+    active_job = GenerationJob.query.filter_by(
+        project_id=project_id,
+        status="processing"
+    ).first()
+
+    if active_job:
+        return jsonify({
+            "error": "A generation job is already running.",
+            "job_id": active_job.id,
+            "status": active_job.status
+        }), 409
+
+    try:
+        result = generate_project_video(project_id)
+
+        return jsonify({
+            "message": "Video generated successfully.",
+            "result": result
+        }), 200
+
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    except Exception:
+        return jsonify({
+            "error": "Video generation failed. Check the generation job for details."
+        }), 500
+
