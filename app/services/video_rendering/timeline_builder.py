@@ -1,70 +1,115 @@
 
 import re
+from difflib import SequenceMatcher
 
 
 def normalize_word(word: str) -> str:
-    """Normalize a word for matching against Whisper output."""
+    """Normalize words for narration alignment."""
     return re.sub(r"[^\w']", "", word.lower())
 
 
-def match_narration_words(
-    narration: str,
-    whisper_words: list,
-    start_index: int,
-    scene_number: int
-) -> tuple:
-    """
-    Match narration tokens against Whisper's timestamped words.
-
-    Returns the matched timestamp words and the next unused index.
-    """
-
-    expected_words = [
-        normalize_word(word)
-        for word in narration.split()
-        if normalize_word(word)
+def tokenize(text: str) -> list[str]:
+    """Convert narration into normalized word tokens."""
+    return [
+        normalized
+        for word in text.split()
+        if (normalized := normalize_word(word))
     ]
 
-    if not expected_words:
+
+def align_words(expected_words: list[str], whisper_words: list[dict]) -> list[tuple]:
+    """
+    Align expected narration tokens with Whisper's timestamped words.
+
+    Returns pairs of (expected_index, whisper_index).
+    Missing and extra words are tolerated, while original Whisper
+    records and timestamps remain unchanged.
+    """
+
+    actual_words = [
+        normalize_word(word.get("word", ""))
+        for word in whisper_words
+    ]
+
+    n = len(expected_words)
+    m = len(actual_words)
+
+    if not n or not m:
+        raise ValueError("Cannot align empty narration or transcription.")
+
+    # Dynamic programming edit-distance alignment.
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    trace = [[None] * (m + 1) for _ in range(n + 1)]
+
+    for i in range(1, n + 1):
+        dp[i][0] = i
+        trace[i][0] = "delete"
+
+    for j in range(1, m + 1):
+        dp[0][j] = j
+        trace[0][j] = "insert"
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            expected = expected_words[i - 1]
+            actual = actual_words[j - 1]
+
+            if expected == actual:
+                substitution_cost = 0
+            else:
+                similarity = SequenceMatcher(
+                    None, expected, actual
+                ).ratio()
+
+                substitution_cost = (
+                    0.5 if similarity >= 0.75 else 1.0
+                )
+
+            choices = [
+                (dp[i - 1][j - 1] + substitution_cost, "match"),
+                (dp[i - 1][j] + 1, "delete"),
+                (dp[i][j - 1] + 1, "insert")
+            ]
+
+            dp[i][j], trace[i][j] = min(
+                choices,
+                key=lambda item: item[0]
+            )
+
+    # Trace the alignment backwards.
+    pairs = []
+    i, j = n, m
+
+    while i > 0 or j > 0:
+        operation = trace[i][j]
+
+        if operation == "match":
+            pairs.append((i - 1, j - 1))
+            i -= 1
+            j -= 1
+
+        elif operation == "delete":
+            i -= 1
+
+        elif operation == "insert":
+            j -= 1
+
+        else:
+            raise ValueError("Could not reconstruct word alignment.")
+
+    pairs.reverse()
+
+    # Reject transcriptions that differ too substantially.
+    error_ratio = dp[n][m] / max(n, m)
+
+    if error_ratio > 0.30:
         raise ValueError(
-            f"Scene {scene_number} contains no usable narration words."
+            "Narration alignment is unreliable. "
+            f"Transcription mismatch: {error_ratio:.0%}. "
+            "Check the generated narration and Whisper transcription."
         )
 
-    matched_words = []
-    whisper_index = start_index
-
-    for expected in expected_words:
-        found = False
-
-        while whisper_index < len(whisper_words):
-            candidate = whisper_words[whisper_index]
-            actual = normalize_word(candidate.get("word", ""))
-
-            whisper_index += 1
-
-            if not actual:
-                continue
-
-            # Exact match
-            if actual == expected:
-                matched_words.append(candidate)
-                found = True
-                break
-
-            # Allow punctuation differences.
-            # Do not silently skip a different spoken word.
-            raise ValueError(
-                f"Word alignment failed in scene {scene_number}. "
-                f"Expected '{expected}', but Whisper detected '{actual}'."
-            )
-
-        if not found:
-            raise ValueError(
-                f"Could not align narration word '{expected}' "
-                f"in scene {scene_number}."
-            )
-
-    return matched_words, whisper_index
+    return pairs
 
 
 def build_timeline(
@@ -74,13 +119,11 @@ def build_timeline(
     ending: str = ""
 ) -> dict:
     """
-    Build a video timeline from scene narration and Whisper timestamps.
+    Build a scene timeline using aligned Whisper timestamps.
 
-    The opening hook is assigned to the first scene.
-    The ending is assigned to the last scene.
-
-    Scene boundaries are based on the first spoken word of each
-    scene, and the final scene ends at the audio duration.
+    Hook words belong to the first scene.
+    Ending words belong to the last scene.
+    Original Whisper word records are preserved for subtitles.
     """
 
     if not scenes:
@@ -103,117 +146,153 @@ def build_timeline(
         key=lambda scene: scene["scene_number"]
     )
 
-    if len(ordered_scenes) != len(scenes):
-        raise ValueError("Invalid scene data.")
+    # Build one continuous expected narration sequence.
+    expected_words = []
+    word_owners = []
 
-    speech_segments = []
-    word_index = 0
-
-    # Match hook words before the first scene narration.
-    if hook and hook.strip():
-        hook_words, word_index = match_narration_words(
-            hook.strip(),
-            words,
-            word_index,
-            scene_number=ordered_scenes[0]["scene_number"]
-        )
-    else:
-        hook_words = []
-
-    # Match each scene's narration.
-    for scene in ordered_scenes:
-        scene_number = scene["scene_number"]
-        narration = scene["narration"].strip()
+    for scene_index, scene in enumerate(ordered_scenes):
+        narration = scene.get("narration", "").strip()
 
         if not narration:
             raise ValueError(
-                f"Scene {scene_number} has empty narration."
+                f"Scene {scene['scene_number']} has empty narration."
             )
 
-        matched_words, word_index = match_narration_words(
-            narration,
-            words,
-            word_index,
-            scene_number
-        )
+        if scene_index == 0 and hook and hook.strip():
+            hook_tokens = tokenize(hook)
 
-        speech_segments.append({
-            "scene_number": scene_number,
-            "narration": narration,
-            "asset_path": scene["asset_path"],
-            "camera_motion": scene.get("camera_motion", "none"),
-            "words": matched_words,
-            "start": matched_words[0]["start"],
-            "speech_end": matched_words[-1]["end"]
-        })
+            expected_words.extend(hook_tokens)
+            word_owners.extend([0] * len(hook_tokens))
 
-    # Match ending words after the last scene narration.
+        scene_tokens = tokenize(narration)
+
+        expected_words.extend(scene_tokens)
+        word_owners.extend([scene_index] * len(scene_tokens))
+
     if ending and ending.strip():
-        ending_words, word_index = match_narration_words(
-            ending.strip(),
-            words,
-            word_index,
-            scene_number=ordered_scenes[-1]["scene_number"]
-        )
-    else:
-        ending_words = []
+        ending_tokens = tokenize(ending)
 
-    # The first scene starts at zero so the hook is not cut off.
-    if hook_words:
-        speech_segments[0]["start"] = hook_words[0]["start"]
-        speech_segments[0]["words"] = (
-            hook_words + speech_segments[0]["words"]
+        expected_words.extend(ending_tokens)
+        word_owners.extend(
+            [len(ordered_scenes) - 1] * len(ending_tokens)
         )
 
-    # The last scene includes the ending.
-    if ending_words:
-        speech_segments[-1]["words"].extend(ending_words)
-        speech_segments[-1]["speech_end"] = ending_words[-1]["end"]
+    if not expected_words:
+        raise ValueError("No usable narration words were found.")
 
-    # Reject unexpected remaining speech.
-    if word_index < len(words):
-        remaining = words[word_index:]
+    # Validate and clean Whisper records without changing their contents.
+    valid_words = []
 
-        # Whisper can occasionally produce trailing empty tokens.
-        remaining = [
-            word for word in remaining
-            if normalize_word(word.get("word", ""))
+    for word in words:
+        normalized = normalize_word(word.get("word", ""))
+
+        if not normalized:
+            continue
+
+        try:
+            start = float(word["start"])
+            end = float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Invalid Whisper word timestamps.")
+
+        if start < 0 or end <= start or end > audio_duration + 0.5:
+            raise ValueError(
+                f"Invalid timestamp for Whisper word: {word.get('word')}"
+            )
+
+        valid_words.append(word)
+
+    if not valid_words:
+        raise ValueError("No valid Whisper word timestamps were found.")
+
+    # Align the complete narration.
+    alignment = align_words(expected_words, valid_words)
+
+    # Assign original Whisper records to their corresponding scenes.
+    scene_words = [[] for _ in ordered_scenes]
+
+    for expected_index, whisper_index in alignment:
+        owner = word_owners[expected_index]
+        scene_words[owner].append(valid_words[whisper_index])
+
+    # Assign unmatched extra Whisper words to the nearest preceding scene.
+    matched_indices = {
+        whisper_index
+        for _, whisper_index in alignment
+    }
+
+    whisper_owner = {
+        whisper_index: word_owners[expected_index]
+        for expected_index, whisper_index in alignment
+    }
+
+    for whisper_index, word in enumerate(valid_words):
+        if whisper_index in matched_indices:
+            continue
+
+        previous_matches = [
+            index for index in whisper_owner
+            if index < whisper_index
         ]
 
-        if remaining:
+        if previous_matches:
+            owner = whisper_owner[max(previous_matches)]
+        else:
+            owner = 0
+
+        scene_words[owner].append(word)
+
+    # Sort words by their original audio timestamps.
+    for assigned_words in scene_words:
+        assigned_words.sort(key=lambda word: word["start"])
+
+    # Every scene must have at least one timestamped word.
+    for index, assigned_words in enumerate(scene_words):
+        if not assigned_words:
             raise ValueError(
-                "Some spoken words could not be assigned to a scene. "
-                f"First unassigned word: '{remaining[0].get('word', '')}'."
+                f"Could not assign any audio words to scene "
+                f"{ordered_scenes[index]['scene_number']}."
             )
 
     # Construct scene boundaries.
     timeline = []
 
-    for index, segment in enumerate(speech_segments):
-        start = 0.0 if index == 0 else segment["start"]
+    for index, scene in enumerate(ordered_scenes):
+        assigned_words = scene_words[index]
 
-        if index < len(speech_segments) - 1:
-            end = speech_segments[index + 1]["start"]
+        start = (
+            0.0
+            if index == 0
+            else float(assigned_words[0]["start"])
+        )
+
+        if index < len(ordered_scenes) - 1:
+            end = float(scene_words[index + 1][0]["start"])
         else:
             end = float(audio_duration)
 
         if end <= start:
             raise ValueError(
                 f"Invalid timeline duration for scene "
-                f"{segment['scene_number']}."
+                f"{scene['scene_number']}."
             )
 
         timeline.append({
-            **segment,
+            "scene_number": scene["scene_number"],
+            "narration": scene["narration"],
+            "asset_path": scene["asset_path"],
+            "camera_motion": scene.get("camera_motion", "none"),
+            "words": assigned_words,
             "start": round(start, 3),
             "end": round(end, 3),
-            "duration": round(end - start, 3)
+            "duration": round(end - start, 3),
+            "speech_end": round(
+                float(assigned_words[-1]["end"]), 3
+            )
         })
 
-    total_duration = round(float(audio_duration), 3)
-
     return {
-        "total_duration": total_duration,
+        "total_duration": round(float(audio_duration), 3),
         "scene_count": len(timeline),
         "scenes": timeline
     }

@@ -82,6 +82,16 @@ def mix_audio(
         raise RuntimeError(
             f"Audio mixing failed:\n{error.stderr[-3000:]}"
         ) from error
+    except subprocess.CalledProcessError as error:
+             raise RuntimeError(
+                 f"Audio mixing failed:\n{error.stderr[-3000:]}"
+            ) from error
+
+
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError("Audio mixing produced no valid output file.")
+
+    
 
     return {
         "output_path": output_path,
