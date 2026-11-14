@@ -24,6 +24,11 @@ class GenerationJob(db.Model):
 
     output_video = db.Column(db.String(500), nullable=True)
 
+    # Process ownership allows safe recovery after a worker crashes.
+    worker_pid = db.Column(db.Integer, nullable=True)
+    worker_host = db.Column(db.String(255), nullable=True)
+    worker_create_time = db.Column(db.Float, nullable=True)
+
     created_at = db.Column(
         db.DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

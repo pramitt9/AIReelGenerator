@@ -1,16 +1,26 @@
 
 import json
+import shutil
+from pathlib import Path
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
+from sqlalchemy import update
 
 from app.extensions import db
 from app.models import Project, GenerationJob
 from app.models.scene import Scene
 
 from app.services.ai.script_generator import generate_script
-from app.services.generation.generation_pipeline import generate_project_video
-from app.services.storage.media_storage import delete_video
+from app.services.generation.generation_pipeline import (
+    generate_project_video,
+    GenerationAlreadyRunningError,
+    recover_stale_generation
+)
+from app.services.storage.media_storage import (
+    delete_video,
+    delete_project_storage,
+)
 
 
 projects = Blueprint(
@@ -42,6 +52,49 @@ def get_owned_project(project_id):
         id=project_id,
         user_id=current_user.id
     ).first()
+
+
+def guard_project_not_generating(project_id):
+    """Acquire a write lock unless a generation job owns this project."""
+    recover_stale_generation(project_id)
+    db.session.expire_all()
+
+    result = db.session.execute(
+        update(Project)
+        .where(
+            Project.id == project_id,
+            Project.status != "processing"
+        )
+        .values(status=Project.status)
+        .execution_options(synchronize_session=False)
+    )
+
+    if result.rowcount != 1:
+        db.session.rollback()
+        active_job = GenerationJob.query.filter_by(
+            project_id=project_id,
+            status="processing"
+        ).first()
+        return jsonify({
+            "error": "This project is currently being generated. "
+                     "Wait for generation to finish before editing it.",
+            "job_id": active_job.id if active_job else None
+        }), 409
+
+    active_job = GenerationJob.query.filter_by(
+        project_id=project_id,
+        status="processing"
+    ).first()
+
+    if active_job:
+        db.session.rollback()
+        return jsonify({
+            "error": "This project is currently being generated. "
+                     "Wait for generation to finish before editing it.",
+            "job_id": active_job.id
+        }), 409
+
+    return None
 
 
 def load_storyboard(project):
@@ -205,6 +258,10 @@ def update_project(project_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
+
     data = request.get_json(silent=True) or {}
 
     title = data.get("title")
@@ -248,8 +305,55 @@ def delete_project(project_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    db.session.delete(project)
-    db.session.commit()
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
+
+    # Remove the database record first. Physical files are cleaned only
+    # after the transaction succeeds, so a failed DB delete keeps the assets.
+    try:
+        db.session.delete(project)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Project deletion failed for project %s",
+            project_id
+        )
+        return jsonify({
+            "error": "Could not delete project."
+        }), 500
+
+    # Clean project-specific media and rendered output. Never touch the
+    # shared storage roots or files belonging to another project.
+    try:
+        delete_project_storage(project_id)
+    except Exception:
+        current_app.logger.exception(
+            "Could not delete media storage for project %s",
+            project_id
+        )
+
+    try:
+        rendered_root = (
+            Path(current_app.root_path).resolve().parent
+            / "storage"
+            / "rendered"
+        ).resolve()
+        rendered_project = (rendered_root / f"project_{project_id}").resolve()
+
+        if (
+            rendered_project.parent == rendered_root
+            and rendered_project.name == f"project_{project_id}"
+            and rendered_project.exists()
+            and rendered_project.is_dir()
+        ):
+            shutil.rmtree(rendered_project)
+    except Exception:
+        current_app.logger.exception(
+            "Could not delete rendered output for project %s",
+            project_id
+        )
 
     return jsonify({
         "message": "Project deleted successfully"
@@ -268,6 +372,10 @@ def generate_project_script(project_id):
 
     if not project:
         return jsonify({"error": "Project not found"}), 404
+
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
 
     try:
         storyboard = generate_script(project.topic)
@@ -437,6 +545,9 @@ def generate_project(project_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    recover_stale_generation(project_id)
+    db.session.expire_all()
+
     active_job = GenerationJob.query.filter_by(
         project_id=project_id,
         status="processing"
@@ -459,6 +570,9 @@ def generate_project(project_id):
 
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+
+    except GenerationAlreadyRunningError as exc:
+        return jsonify({"error": str(exc)}), 409
 
     except Exception:
         current_app.logger.exception(
@@ -486,6 +600,10 @@ def update_scene(project_id, scene_id):
 
     if not project:
         return jsonify({"error": "Project not found"}), 404
+
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
 
     scene = Scene.query.filter_by(
         id=scene_id,
@@ -635,6 +753,10 @@ def add_scene(project_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
+
     data = request.get_json(silent=True) or {}
 
     narration = data.get("narration", "")
@@ -745,6 +867,10 @@ def delete_scene(project_id, scene_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
+
     scene = Scene.query.filter_by(
         id=scene_id,
         project_id=project_id
@@ -830,6 +956,10 @@ def reorder_scenes(project_id):
 
     if not project:
         return jsonify({"error": "Project not found"}), 404
+
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
 
     data = request.get_json(silent=True) or {}
     scene_ids = data.get("scene_ids")
@@ -926,6 +1056,10 @@ def update_storyboard_text(project_id):
 
     if not project:
         return jsonify({"error": "Project not found"}), 404
+
+    guard_response = guard_project_not_generating(project_id)
+    if guard_response:
+        return guard_response
 
     data = request.get_json(silent=True) or {}
 

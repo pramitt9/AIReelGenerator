@@ -1,7 +1,13 @@
 
 import json
+import os
+import socket
+
+import psutil
 from datetime import datetime, timezone
 from pathlib import Path
+
+from sqlalchemy import update
 
 from flask import current_app
 
@@ -17,6 +23,122 @@ from app.services.video_rendering.subtitle_renderer import render_subtitles
 from app.services.audio.audio_mixer import mix_audio
 
 
+class GenerationAlreadyRunningError(RuntimeError):
+    """Raised when another request already owns this project's generation slot."""
+
+
+def _process_is_same_worker(pid: int, expected_create_time: float):
+    """
+    Return True for the original worker, False when it is gone or the PID
+    belongs to a different process, and None when process identity is unknown.
+    """
+    if (
+        not isinstance(pid, int)
+        or isinstance(pid, bool)
+        or pid <= 0
+        or not isinstance(expected_create_time, (int, float))
+    ):
+        return None
+
+    try:
+        process = psutil.Process(pid)
+        actual_create_time = process.create_time()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+    except psutil.AccessDenied:
+        # Never recover a job when Windows does not let us verify its owner.
+        return None
+    except psutil.Error:
+        return None
+
+    # Allow a tiny tolerance for floating-point storage in SQLite.
+    return abs(actual_create_time - float(expected_create_time)) <= 0.000001
+
+
+def recover_stale_generation(project_id: int) -> bool:
+    """
+    Recover a generation only when its recorded local worker is confirmed dead.
+
+    Jobs owned by another host, or legacy jobs without process ownership, are
+    left untouched because their liveness cannot be established safely.
+    """
+    project = db.session.get(Project, project_id)
+    if not project:
+        return False
+
+    active_job = (
+        GenerationJob.query
+        .filter_by(project_id=project_id, status="processing")
+        .order_by(GenerationJob.id.desc())
+        .first()
+    )
+
+    if active_job:
+        if (
+            not active_job.worker_pid
+            or not active_job.worker_host
+            or active_job.worker_create_time is None
+        ):
+            return False
+
+        if active_job.worker_host != socket.gethostname():
+            return False
+
+        worker_is_same = _process_is_same_worker(
+            active_job.worker_pid,
+            active_job.worker_create_time
+        )
+        if worker_is_same is not False:
+            # The original worker is alive, or its identity cannot be verified.
+            return False
+
+        # Compare-and-set prevents two recovery requests from finalizing
+        # the same job concurrently.
+        result = db.session.execute(
+            update(GenerationJob)
+            .where(
+                GenerationJob.id == active_job.id,
+                GenerationJob.status == "processing",
+                GenerationJob.worker_pid == active_job.worker_pid,
+                GenerationJob.worker_host == active_job.worker_host,
+                GenerationJob.worker_create_time == active_job.worker_create_time
+            )
+            .values(
+                status="failed",
+                error_message="Generation worker stopped unexpectedly. "
+                              "The abandoned job was recovered automatically.",
+                completed_at=datetime.now(timezone.utc)
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+        if result.rowcount != 1:
+            db.session.rollback()
+            return False
+
+    elif project.status != "processing":
+        return False
+
+    # Restore the project status without removing any previous successful
+    # output. A previous completed job counts only if its file still exists.
+    previous_jobs = (
+        GenerationJob.query
+        .filter_by(project_id=project_id, status="completed")
+        .all()
+    )
+    previous_video_exists = any(
+        item.output_video and Path(item.output_video).is_file()
+        for item in previous_jobs
+    )
+
+    project.status = "completed" if previous_video_exists else "failed"
+    db.session.commit()
+    current_app.logger.warning(
+        "Recovered abandoned generation state for project %s", project_id
+    )
+    return True
+
+
 def generate_project_video(project_id: int) -> dict:
     """Generate a complete video from a project's saved storyboard."""
 
@@ -30,21 +152,68 @@ def generate_project_video(project_id: int) -> dict:
             "No saved storyboard found. Generate a storyboard first."
         )
 
-    # Prevent a second generation while this project already has an active job.
+    # Recover a confirmed-dead local worker before rejecting a retry.
+    recover_stale_generation(project_id)
+    db.session.expire_all()
+    project = db.session.get(Project, project_id)
+
+    # Fast rejection for the common duplicate-request case.
     active_job = GenerationJob.query.filter_by(
         project_id=project_id,
         status="processing"
     ).first()
 
     if active_job:
-        raise RuntimeError(
+        raise GenerationAlreadyRunningError(
             "A video generation job is already running for this project."
+        )
+
+    # Atomically claim the project row. A second request cannot also change
+    # the status from a non-processing state to processing.
+    reservation = db.session.execute(
+        update(Project)
+        .where(
+            Project.id == project_id,
+            Project.status != "processing"
+        )
+        .values(status="processing")
+        .execution_options(synchronize_session=False)
+    )
+
+    if reservation.rowcount != 1:
+        active_job = GenerationJob.query.filter_by(
+            project_id=project_id,
+            status="processing"
+        ).first()
+
+        if active_job:
+            raise GenerationAlreadyRunningError(
+                "A video generation job is already running for this project."
+            )
+
+        raise GenerationAlreadyRunningError(
+            "This project is marked as processing but has no active job. "
+            "Reset the project status before retrying generation."
+        )
+
+    # Reload the storyboard after acquiring the reservation so generation
+    # always uses the latest committed version, not a pre-lock snapshot.
+    db.session.refresh(project)
+
+    if not project.script:
+        project.status = "draft"
+        db.session.commit()
+        raise ValueError(
+            "No saved storyboard found. Generate a storyboard first."
         )
 
     job = GenerationJob(
         project_id=project_id,
         status="processing",
-        progress=0
+        progress=0,
+        worker_pid=os.getpid(),
+        worker_host=socket.gethostname(),
+        worker_create_time=psutil.Process(os.getpid()).create_time()
     )
 
     db.session.add(job)

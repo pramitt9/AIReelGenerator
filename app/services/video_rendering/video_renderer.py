@@ -2,6 +2,8 @@
 import os
 import subprocess
 import uuid
+import math
+from fractions import Fraction
 from pathlib import Path
 
 
@@ -34,14 +36,17 @@ def render_video(
     only after successful FFprobe validation.
     """
 
+    if not isinstance(timeline, dict):
+        raise ValueError("Timeline must be a dictionary.")
+
     scenes = timeline.get("scenes", [])
 
-    if not scenes:
+    if not isinstance(scenes, list) or not scenes:
         raise ValueError("Timeline contains no scenes.")
 
     total_duration = float(timeline["total_duration"])
 
-    if total_duration <= 0:
+    if not math.isfinite(total_duration) or total_duration <= 0:
         raise ValueError("Invalid timeline duration.")
 
     if width <= 0 or height <= 0 or fps <= 0:
@@ -56,7 +61,7 @@ def render_video(
     if transition not in {"cut", "crossfade", "fadeblack"}:
         raise ValueError(f"Unsupported transition: {transition}")
 
-    if transition_duration < 0:
+    if not math.isfinite(transition_duration) or transition_duration < 0:
         raise ValueError("Transition duration cannot be negative.")
 
     if transition != "cut" and transition_duration <= 0:
@@ -88,6 +93,11 @@ def render_video(
 
             start = float(scene["start"])
             end = float(scene["end"])
+
+            if not math.isfinite(start) or not math.isfinite(end):
+                raise ValueError(
+                    f"Non-finite timing for scene {scene.get('scene_number')}."
+                )
 
             if (
                 start < 0
@@ -326,7 +336,7 @@ def render_video(
             "ffprobe",
             "-v", "error",
             "-show_entries",
-            "stream=codec_type,width,height:format=duration",
+            "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,duration,nb_frames:format=duration",
             "-of", "json",
             str(temporary_output)
         ]
@@ -349,9 +359,9 @@ def render_video(
             if stream.get("codec_type") == "video"
         ]
 
-        if not video_streams:
+        if len(video_streams) != 1:
             raise RuntimeError(
-                "Rendered file does not contain a valid video stream."
+                "Rendered file must contain exactly one video stream."
             )
 
         video_stream = video_streams[0]
@@ -368,12 +378,39 @@ def render_video(
             probe_data.get("format", {}).get("duration", 0)
         )
 
-        if actual_duration <= 0:
+        if not math.isfinite(actual_duration) or actual_duration <= 0:
             raise RuntimeError(
                 "Rendered video has an invalid duration."
             )
 
-        # Replace the destination only after validation succeeds.
+        # Verify that FFmpeg produced the intended frame rate.
+        reported_fps = (
+            video_stream.get("avg_frame_rate")
+            or video_stream.get("r_frame_rate")
+        )
+        try:
+            actual_fps = float(Fraction(reported_fps))
+        except (TypeError, ValueError, ZeroDivisionError):
+            raise RuntimeError(
+                "FFprobe could not determine the rendered frame rate."
+            )
+
+        if not math.isfinite(actual_fps) or abs(actual_fps - fps) > 0.05:
+            raise RuntimeError(
+                f"Rendered video has an unexpected frame rate: "
+                f"{actual_fps:g} FPS (expected {fps} FPS)."
+            )
+
+        # Duration can differ by a small number of encoded frames.
+        duration_tolerance = max(0.15, 2.0 / fps)
+        if abs(actual_duration - rendered_duration) > duration_tolerance:
+            raise RuntimeError(
+                f"Rendered duration mismatch: {actual_duration:.3f}s "
+                f"(expected {rendered_duration:.3f}s, tolerance "
+                f"{duration_tolerance:.3f}s)."
+            )
+
+        # Replace the destination only after every validation succeeds.
         os.replace(temporary_output, output)
 
         return {
