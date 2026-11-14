@@ -1,0 +1,12 @@
+﻿Flask==3.1.1
+Flask-Login==0.6.3
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.43
+openai==1.97.1
+elevenlabs==2.8.1
+faster-whisper==1.2.1
+numpy==2.3.1
+psutil==7.0.0
+requests==2.32.4
+python-dotenv==1.1.1
+PyMySQL==1.1.1
