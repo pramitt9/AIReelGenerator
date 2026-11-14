@@ -3,20 +3,37 @@ import os
 
 from app.extensions import db
 from app.models import Scene
+
 from app.services.video_search.pixabay import search_videos
 from app.services.video_search.asset_selector import select_best_video
 from app.services.storage.media_storage import download_video
 
 
+def clear_scene_asset(scene: Scene) -> None:
+    """Clear previously selected visual asset metadata."""
+
+    scene.provider = None
+    scene.provider_video_id = None
+    scene.asset_url = None
+    scene.asset_path = None
+    scene.thumbnail_url = None
+    scene.width = None
+    scene.height = None
+
+
 def process_storyboard(project_id: int, storyboard: dict) -> dict:
     """
-    Process every storyboard scene:
-    1. Create or retrieve its database record.
-    2. Search Pixabay.
-    3. Select suitable footage.
-    4. Download the selected asset.
-    5. Save metadata and processing status.
+    Process storyboard scenes.
+
+    Existing footage is reused only when the visual description
+    and visual type have not changed.
+
+    Changes to narration, duration or camera motion do not require
+    downloading new footage.
     """
+
+    if not isinstance(storyboard, dict):
+        raise ValueError("Invalid storyboard format.")
 
     scenes_data = storyboard.get("scenes", [])
 
@@ -41,47 +58,82 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
     for index, scene_data in enumerate(scenes_data, start=1):
 
+        if not isinstance(scene_data, dict):
+            summary["failed"] += 1
+            summary["results"].append({
+                "scene_number": index,
+                "status": "failed",
+                "error": "Invalid scene data."
+            })
+            continue
+
         scene_number = scene_data.get("scene_number", index)
 
-        narration = scene_data.get("narration", "").strip()
+        narration = scene_data.get("narration", "")
         visual_description = scene_data.get(
             "visual_description", ""
-        ).strip()
+        )
 
         duration = scene_data.get("duration", 5)
         visual_type = scene_data.get(
             "visual_type", "stock_video"
         )
+        camera_motion = scene_data.get(
+            "camera_motion", "none"
+        )
 
-        allowed_motions = {
-            "none",
-            "zoom_in",
-            "zoom_out",
-            "pan"
-        }
+        # Validate and normalize inputs.
+        if not isinstance(narration, str):
+            narration = ""
 
-        camera_motion = scene_data.get("camera_motion", "none")
+        if not isinstance(visual_description, str):
+            visual_description = ""
+
+        narration = narration.strip()
+        visual_description = visual_description.strip()
 
         if camera_motion not in allowed_motions:
             camera_motion = "none"
 
-        if not narration or not visual_description:
+        if (
+            not narration
+            or not visual_description
+            or visual_type not in {"stock_video", "ai_generated"}
+        ):
             summary["failed"] += 1
             summary["results"].append({
                 "scene_number": scene_number,
                 "status": "failed",
-                "error": "Missing narration or visual description."
+                "error": "Missing or invalid scene information."
             })
             continue
 
         try:
-            # Find an existing scene or create one.
+            # Retrieve existing scene.
             scene = Scene.query.filter_by(
                 project_id=project_id,
                 scene_number=scene_number
             ).first()
 
-            if not scene:
+            if scene:
+                # Check whether the visual requirements changed
+                # before overwriting the existing values.
+                visual_changed = (
+                    scene.visual_description != visual_description
+                    or scene.visual_type != visual_type
+                )
+
+                # Invalidate old footage if visual requirements changed.
+                if visual_changed:
+                    clear_scene_asset(scene)
+
+                scene.narration = narration
+                scene.visual_description = visual_description
+                scene.visual_type = visual_type
+                scene.duration = duration
+                scene.camera_motion = camera_motion
+
+            else:
                 scene = Scene(
                     project_id=project_id,
                     scene_number=scene_number,
@@ -92,19 +144,15 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     status="pending",
                     camera_motion=camera_motion
                 )
+
                 db.session.add(scene)
-                db.session.commit()
 
-            else:
-                scene.narration = narration
-                scene.visual_description = visual_description
-                scene.visual_type = visual_type
-                scene.duration = duration
-                scene.camera_motion = camera_motion
+            db.session.commit()
 
-            # Skip downloading an asset that already exists.
+            # Reuse existing footage only if it still exists.
             if scene.asset_path and os.path.isfile(scene.asset_path):
                 scene.status = "completed"
+                scene.error_message = None
                 db.session.commit()
 
                 summary["completed"] += 1
@@ -114,13 +162,15 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     "asset_path": scene.asset_path,
                     "reused": True
                 })
+
                 continue
 
-            # AI-generated visuals will be handled by a
-            # separate provider later.
+            # AI-generated visuals require a separate provider.
             if visual_type == "ai_generated":
                 scene.status = "needs_visual"
-                scene.error_message = "AI visual generation required."
+                scene.error_message = (
+                    "AI visual generation required."
+                )
                 db.session.commit()
 
                 summary["needs_visual"] += 1
@@ -128,13 +178,14 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     "scene_number": scene_number,
                     "status": "needs_visual"
                 })
+
                 continue
 
             scene.status = "processing"
             scene.error_message = None
             db.session.commit()
 
-            # Search footage using the scene description.
+            # Search Pixabay.
             videos = search_videos(
                 visual_description,
                 per_page=10
@@ -142,7 +193,9 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
             if not videos:
                 scene.status = "needs_visual"
-                scene.error_message = "No matching stock footage found."
+                scene.error_message = (
+                    "No matching stock footage found."
+                )
                 db.session.commit()
 
                 summary["needs_visual"] += 1
@@ -150,6 +203,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     "scene_number": scene_number,
                     "status": "needs_visual"
                 })
+
                 continue
 
             # Select the best candidate.
@@ -161,7 +215,9 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
             if not best:
                 scene.status = "needs_visual"
-                scene.error_message = "No suitable footage found."
+                scene.error_message = (
+                    "No suitable footage found."
+                )
                 db.session.commit()
 
                 summary["needs_visual"] += 1
@@ -169,6 +225,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     "scene_number": scene_number,
                     "status": "needs_visual"
                 })
+
                 continue
 
             # Download selected footage.
@@ -177,6 +234,11 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 project_id=project_id,
                 scene_number=scene_number
             )
+
+            if not asset_path or not os.path.isfile(asset_path):
+                raise RuntimeError(
+                    "Downloaded footage could not be found."
+                )
 
             # Save selected asset metadata.
             scene.provider = "pixabay"
@@ -203,8 +265,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         except Exception as exc:
             db.session.rollback()
 
-            # Persist the failure separately so one bad scene
-            # doesn't stop the remaining scenes.
+            # Persist failure without stopping other scenes.
             try:
                 failed_scene = Scene.query.filter_by(
                     project_id=project_id,

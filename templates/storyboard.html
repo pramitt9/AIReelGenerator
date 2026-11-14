@@ -1,0 +1,576 @@
+{% extends "base.html" %}
+
+{% block title %}Storyboard Editor | VidSnapAI{% endblock %}
+
+{% block extra_css %}
+<style>
+    .storyboard-wrapper { max-width: 1050px; margin: auto; }
+    .storyboard-header { margin-bottom: 32px; }
+    .eyebrow {
+        color: var(--accent-hover); font-size: .8rem; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase;
+    }
+    .storyboard-header h1 {
+        font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 800; margin: 10px 0;
+    }
+    .storyboard-panel, .scene-card {
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: 15px;
+    }
+    .storyboard-panel { padding: 24px; margin-bottom: 24px; }
+    .hook-panel { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+    .ending-panel { border-left: 4px solid var(--success); }
+    .section-label {
+        color: var(--accent-hover); font-size: .78rem; font-weight: 700;
+        letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px;
+    }
+    .scene-card { overflow: hidden; margin-bottom: 20px; }
+    .scene-top {
+        display: flex; justify-content: space-between; align-items: center;
+        flex-wrap: wrap; gap: 12px; padding: 17px 22px;
+        border-bottom: 1px solid var(--border); background: rgba(255,255,255,.025);
+    }
+    .scene-number { display: flex; align-items: center; gap: 12px; font-weight: 700; }
+   .scene-number > span:first-child {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    color: var(--accent-hover);
+}
+
+.scene-number .scene-title {
+    display: inline;
+    width: auto;
+    height: auto;
+    background: none;
+    color: inherit;
+    border-radius: 0;
+}
+    .scene-body { padding: 22px; }
+    .scene-field { margin-bottom: 20px; }
+    .scene-field:last-child { margin-bottom: 0; }
+    .scene-field label {
+        display: block; color: var(--text-secondary); font-size: .82rem;
+        font-weight: 700; margin-bottom: 9px;
+    }
+    .scene-field textarea { min-height: 85px; resize: vertical; }
+    .scene-field .form-control, .scene-field .form-select { font-size: .92rem; }
+    .scene-actions {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 12px; margin-top: 22px; padding-top: 18px;
+        border-top: 1px solid var(--border);
+    }
+    .save-status { font-size: .85rem; color: var(--text-secondary); }
+    .save-status.saved { color: var(--success); }
+    .save-status.error { color: var(--danger); }
+    .scene-order-actions { display: flex; gap: 6px; }
+    .scene-order-actions .btn { padding: 5px 9px; }
+    .loading-state { text-align: center; padding: 60px 20px; }
+    .loading-spinner {
+        width: 42px; height: 42px; border: 4px solid var(--border);
+        border-top-color: var(--accent); border-radius: 50%;
+        animation: spin .8s linear infinite; margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media(max-width:576px) {
+        .storyboard-panel, .scene-body { padding: 18px; }
+        .scene-top { padding: 14px 18px; }
+        .scene-actions .btn { width: 100%; }
+        .scene-order-actions .btn { width: auto; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="storyboard-wrapper">
+        <div class="storyboard-header">
+            <div class="eyebrow"><i class="fas fa-film me-2"></i>Production Workspace</div>
+            <h1>{{ project.title }}</h1>
+            <p class="text-muted">Edit your narration, visuals and scene settings before production.</p>
+        </div>
+
+        <div class="storyboard-panel">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <div>
+                    <h5 class="fw-bold mb-1">Your Storyboard</h5>
+                    <p class="text-muted small mb-0" id="storyboardSummary">{{ project.scenes|length }} scenes loaded</p>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-primary" id="addSceneBtn" type="button">
+                        <i class="fas fa-plus me-2"></i>Add Scene
+                    </button>
+                    <button class="btn btn-primary" id="generateBtn" type="button">
+                        <i class="fas fa-wand-magic-sparkles me-2"></i>Regenerate Storyboard
+                    </button>
+                </div>
+            </div>
+            <div id="globalError" class="mt-3" style="color:var(--danger)" role="alert"></div>
+            <div id="globalSuccess" class="mt-2" class="text-success" role="status"></div>
+        </div>
+
+        <div id="loadingState" class="storyboard-panel loading-state" hidden>
+            <div class="loading-spinner"></div>
+            <h5 class="fw-bold">Generating your storyboard...</h5>
+            <p class="text-muted mb-0">Please wait while AI creates your scenes.</p>
+        </div>
+
+        <div class="storyboard-panel hook-panel">
+            <div class="section-label"><i class="fas fa-bolt me-2"></i>Opening Hook</div>
+            <textarea class="form-control" id="hookInput" rows="3" maxlength="2000"
+                      placeholder="Write your opening hook..."></textarea>
+            <div class="scene-actions">
+                <span class="save-status" id="hookStatus">No unsaved changes</span>
+                <button type="button" class="btn btn-outline-primary" id="saveHookBtn">
+                    <i class="fas fa-save me-2"></i>Save Hook
+                </button>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="fw-bold mb-0">Scene Breakdown</h4>
+            <span class="badge" id="sceneCountBadge"
+                  style="background:var(--accent-soft);color:var(--accent-hover)">
+                {{ project.scenes|length }} Scenes
+            </span>
+        </div>
+
+        <div id="sceneContainer">
+            {% for scene in project.scenes %}
+            <article class="scene-card" data-scene-id="{{ scene.id }}">
+                <div class="scene-top">
+                    <div class="scene-number">
+                        <span>{{ scene.scene_number }}</span>
+                        <span class="scene-title">Scene {{ scene.scene_number }}</span>
+                    </div>
+                    <div class="d-flex align-items-center flex-wrap gap-3">
+                        <span class="text-muted small">
+                            <i class="far fa-clock me-1"></i>
+                            <span class="duration-display">{{ scene.duration }}</span> seconds
+                        </span>
+                        <div class="scene-order-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary move-up-btn"
+                                    title="Move scene up" aria-label="Move scene up">
+                                <i class="fas fa-arrow-up"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary move-down-btn"
+                                    title="Move scene down" aria-label="Move scene down">
+                                <i class="fas fa-arrow-down"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-body">
+                    <div class="scene-field">
+                        <label>Narration</label>
+                        <textarea class="form-control narration-input" maxlength="5000">{{ scene.narration }}</textarea>
+                    </div>
+                    <div class="scene-field">
+                        <label>Visual Description</label>
+                        <textarea class="form-control visual-input" maxlength="5000">{{ scene.visual_description }}</textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="scene-field">
+                                <label>Duration (seconds)</label>
+                                <input type="number" class="form-control duration-input" min="1" max="30"
+                                       step="0.5" value="{{ scene.duration }}">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="scene-field">
+                                <label>Camera Motion</label>
+                                <select class="form-select motion-input">
+                                    <option value="none" {% if scene.camera_motion == 'none' %}selected{% endif %}>None</option>
+                                    <option value="zoom_in" {% if scene.camera_motion == 'zoom_in' %}selected{% endif %}>Zoom In</option>
+                                    <option value="zoom_out" {% if scene.camera_motion == 'zoom_out' %}selected{% endif %}>Zoom Out</option>
+                                    <option value="pan" {% if scene.camera_motion == 'pan' %}selected{% endif %}>Pan</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="scene-field">
+                                <label>Visual Type</label>
+                                <select class="form-select visual-type-input">
+                                    <option value="stock_video" {% if scene.visual_type == 'stock_video' %}selected{% endif %}>Stock Video</option>
+                                    <option value="ai_generated" {% if scene.visual_type == 'ai_generated' %}selected{% endif %}>AI Generated</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="scene-actions">
+                        <span class="save-status">No unsaved changes</span>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-danger delete-scene-btn">
+                                <i class="fas fa-trash me-2"></i>Delete Scene
+                            </button>
+                            <button type="button" class="btn btn-outline-primary save-scene-btn">
+                                <i class="fas fa-save me-2"></i>Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </article>
+            {% else %}
+            <div class="storyboard-panel text-center empty-scenes">
+                <p class="text-muted mb-0">No scenes found. Add a scene or generate a storyboard to begin.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="storyboard-panel ending-panel">
+            <div class="section-label" style="color:var(--success)">
+                <i class="fas fa-flag-checkered me-2"></i>Ending
+            </div>
+            <textarea class="form-control" id="endingInput" rows="3" maxlength="2000"
+                      placeholder="Write your ending..."></textarea>
+            <div class="scene-actions">
+                <span class="save-status" id="endingStatus">No unsaved changes</span>
+                <button type="button" class="btn btn-outline-primary" id="saveEndingBtn">
+                    <i class="fas fa-save me-2"></i>Save Ending
+                </button>
+            </div>
+        </div>
+
+        <div class="storyboard-panel">
+            <h5 class="fw-bold">Ready for production?</h5>
+            <p class="text-muted mb-0">Review and save your hook, ending and scene changes before moving to video generation.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const projectId = {{ project.id }};
+const sceneContainer = document.getElementById("sceneContainer");
+const globalError = document.getElementById("globalError");
+const globalSuccess = document.getElementById("globalSuccess");
+const loadingState = document.getElementById("loadingState");
+const savedScript = {{ project.script|tojson }};
+
+const hookInput = document.getElementById("hookInput");
+const endingInput = document.getElementById("endingInput");
+
+if (savedScript) {
+    try {
+        const storyboard = typeof savedScript === "string" ? JSON.parse(savedScript) : savedScript;
+        hookInput.value = storyboard.hook || "";
+        endingInput.value = storyboard.ending || "";
+    } catch (error) {
+        console.error("Could not parse saved storyboard:", error);
+    }
+}
+
+function showError(message) {
+    globalError.textContent = message || "";
+    globalSuccess.textContent = "";
+}
+function showSuccess(message) {
+    globalError.textContent = "";
+    globalSuccess.textContent = message || "";
+}
+function updateSceneCounts() {
+    const count = sceneContainer.querySelectorAll(".scene-card").length;
+    document.getElementById("storyboardSummary").textContent = `${count} scenes loaded`;
+    document.getElementById("sceneCountBadge").textContent = `${count} Scenes`;
+    const empty = sceneContainer.querySelector(".empty-scenes");
+    if (count === 0 && !empty) {
+        sceneContainer.innerHTML = '<div class="storyboard-panel text-center empty-scenes"><p class="text-muted mb-0">No scenes found. Add a scene or generate a storyboard to begin.</p></div>';
+    } else if (count > 0 && empty) {
+        empty.remove();
+    }
+    refreshSceneNumbers();
+}
+function refreshSceneNumbers() {
+    const cards = [...sceneContainer.querySelectorAll(".scene-card")];
+    cards.forEach((card, index) => {
+        const number = index + 1;
+        card.querySelector(".scene-number > span").textContent = number;
+        card.querySelector(".scene-title").textContent = `Scene ${number}`;
+        card.querySelector(".move-up-btn").disabled = index === 0;
+        card.querySelector(".move-down-btn").disabled = index === cards.length - 1;
+    });
+}
+
+function createSceneCard(scene) {
+    const card = document.createElement("article");
+    card.className = "scene-card";
+    card.dataset.sceneId = scene.id;
+    card.innerHTML = `
+        <div class="scene-top">
+            <div class="scene-number"><span></span><span class="scene-title"></span></div>
+            <div class="d-flex align-items-center flex-wrap gap-3">
+                <span class="text-muted small"><i class="far fa-clock me-1"></i>
+                    <span class="duration-display">${scene.duration}</span> seconds
+                </span>
+                <div class="scene-order-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary move-up-btn" title="Move scene up" aria-label="Move scene up"><i class="fas fa-arrow-up"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary move-down-btn" title="Move scene down" aria-label="Move scene down"><i class="fas fa-arrow-down"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="scene-body">
+            <div class="scene-field">
+                <label>Narration</label>
+                <textarea class="form-control narration-input" maxlength="5000"></textarea>
+            </div>
+            <div class="scene-field">
+                <label>Visual Description</label>
+                <textarea class="form-control visual-input" maxlength="5000"></textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-4"><div class="scene-field">
+                    <label>Duration (seconds)</label>
+                    <input type="number" class="form-control duration-input" min="1" max="30" step="0.5">
+                </div></div>
+                <div class="col-md-4"><div class="scene-field">
+                    <label>Camera Motion</label>
+                    <select class="form-select motion-input">
+                        <option value="none">None</option><option value="zoom_in">Zoom In</option>
+                        <option value="zoom_out">Zoom Out</option><option value="pan">Pan</option>
+                    </select>
+                </div></div>
+                <div class="col-md-4"><div class="scene-field">
+                    <label>Visual Type</label>
+                    <select class="form-select visual-type-input">
+                        <option value="stock_video">Stock Video</option><option value="ai_generated">AI Generated</option>
+                    </select>
+                </div></div>
+            </div>
+            <div class="scene-actions">
+                <span class="save-status">No unsaved changes</span>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-danger delete-scene-btn"><i class="fas fa-trash me-2"></i>Delete Scene</button>
+                    <button type="button" class="btn btn-outline-primary save-scene-btn"><i class="fas fa-save me-2"></i>Save Changes</button>
+                </div>
+            </div>
+        </div>`;
+    card.querySelector(".narration-input").value = scene.narration || "";
+    card.querySelector(".visual-input").value = scene.visual_description || "";
+    card.querySelector(".duration-input").value = scene.duration || 5;
+    card.querySelector(".motion-input").value = scene.camera_motion || "none";
+    card.querySelector(".visual-type-input").value = scene.visual_type || "stock_video";
+    return card;
+}
+
+async function saveScene(card, button) {
+    const sceneId = card.dataset.sceneId;
+    const status = card.querySelector(".save-status");
+    const payload = {
+        narration: card.querySelector(".narration-input").value,
+        visual_description: card.querySelector(".visual-input").value,
+        duration: card.querySelector(".duration-input").value,
+        camera_motion: card.querySelector(".motion-input").value,
+        visual_type: card.querySelector(".visual-type-input").value
+    };
+    status.textContent = "Saving...";
+    status.className = "save-status";
+    button.disabled = true;
+    try {
+        const response = await fetch(`/api/projects/${projectId}/scenes/${sceneId}`, {
+            method: "PUT", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not save scene.");
+        card.querySelector(".duration-display").textContent = data.scene.duration;
+        status.textContent = "Changes saved successfully";
+        status.className = "save-status saved";
+    } catch (error) {
+        status.textContent = error.message;
+        status.className = "save-status error";
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function saveStoryboardField(field, input, status, button) {
+    const originalText = button.innerHTML;
+    status.textContent = "Saving...";
+    status.className = "save-status";
+    button.disabled = true;
+    try {
+        const response = await fetch(`/api/projects/${projectId}/storyboard`, {
+            method: "PUT", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({[field]: input.value})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not save changes.");
+        status.textContent = "Changes saved successfully";
+        status.className = "save-status saved";
+    } catch (error) {
+        status.textContent = error.message;
+        status.className = "save-status error";
+    } finally {
+        button.disabled = false;
+        button.innerHTML = originalText;
+    }
+}
+
+async function addScene() {
+    showError("");
+    const button = document.getElementById("addSceneBtn");
+    button.disabled = true;
+    try {
+        const response = await fetch(`/api/projects/${projectId}/scenes`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                narration: "Write the narration for this scene.",
+                visual_description: "Describe the visuals for this scene.",
+                duration: 5, camera_motion: "none", visual_type: "stock_video"
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not add scene.");
+        const scene = data.scene;
+        const empty = sceneContainer.querySelector(".empty-scenes");
+        if (empty) empty.remove();
+        sceneContainer.appendChild(createSceneCard(scene));
+        updateSceneCounts();
+        showSuccess("Scene added. Edit its content and save your changes.");
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function deleteScene(card) {
+    const sceneId = card.dataset.sceneId;
+    const number = card.querySelector(".scene-title").textContent;
+    if (!confirm(`Delete ${number}? This cannot be undone.`)) return;
+    const button = card.querySelector(".delete-scene-btn");
+    button.disabled = true;
+    showError("");
+    try {
+        const response = await fetch(`/api/projects/${projectId}/scenes/${sceneId}`, {method: "DELETE"});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not delete scene.");
+        card.remove();
+        updateSceneCounts();
+        showSuccess("Scene deleted.");
+    } catch (error) {
+        showError(error.message);
+        button.disabled = false;
+    }
+}
+
+async function moveScene(card, direction) {
+    const cards = [...sceneContainer.querySelectorAll(".scene-card")];
+    const index = cards.indexOf(card);
+    const targetIndex = index + direction;
+
+    if (targetIndex < 0 || targetIndex >= cards.length) return;
+
+    const neighbor = cards[targetIndex];
+    const sceneIds = cards.map(item => Number(item.dataset.sceneId));
+
+    [sceneIds[index], sceneIds[targetIndex]] =
+        [sceneIds[targetIndex], sceneIds[index]];
+
+    showError("");
+
+    try {
+        const response = await fetch(
+            `/api/projects/${projectId}/scenes/reorder`,
+            {
+                method: "PUT",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({scene_ids: sceneIds})
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Could not reorder scenes.");
+        }
+
+        // Remember the clicked scene's screen position.
+        const oldTop = card.getBoundingClientRect().top;
+
+        // Move only the two affected cards.
+        if (direction < 0) {
+            sceneContainer.insertBefore(card, neighbor);
+        } else {
+            sceneContainer.insertBefore(neighbor, card);
+        }
+
+        updateSceneCounts();
+
+        // Compensate for the small layout shift without jumping.
+        const newTop = card.getBoundingClientRect().top;
+        window.scrollBy(0, newTop - oldTop);
+
+        showSuccess("Scene order updated.");
+
+    } catch (error) {
+        showError(error.message);
+    }
+}
+
+sceneContainer.addEventListener("click", event => {
+    const card = event.target.closest(".scene-card");
+    if (!card) return;
+    if (event.target.closest(".save-scene-btn")) {
+        saveScene(card, card.querySelector(".save-scene-btn"));
+    } else if (event.target.closest(".delete-scene-btn")) {
+        deleteScene(card);
+    } else if (event.target.closest(".move-up-btn")) {
+        moveScene(card, -1);
+    } else if (event.target.closest(".move-down-btn")) {
+        moveScene(card, 1);
+    }
+});
+sceneContainer.addEventListener("input", event => {
+    if (event.target.matches("textarea, input, select")) {
+        const status = event.target.closest(".scene-card")?.querySelector(".save-status");
+        if (status) {
+            status.textContent = "Unsaved changes";
+            status.className = "save-status";
+        }
+    }
+});
+document.getElementById("addSceneBtn").addEventListener("click", addScene);
+document.getElementById("saveHookBtn").addEventListener("click", () =>
+    saveStoryboardField("hook", hookInput, document.getElementById("hookStatus"), document.getElementById("saveHookBtn"))
+);
+document.getElementById("saveEndingBtn").addEventListener("click", () =>
+    saveStoryboardField("ending", endingInput, document.getElementById("endingStatus"), document.getElementById("saveEndingBtn"))
+);
+hookInput.addEventListener("input", () => {
+    const status = document.getElementById("hookStatus");
+    status.textContent = "Unsaved changes"; status.className = "save-status";
+});
+endingInput.addEventListener("input", () => {
+    const status = document.getElementById("endingStatus");
+    status.textContent = "Unsaved changes"; status.className = "save-status";
+});
+
+document.getElementById("generateBtn").addEventListener("click", async () => {
+    const confirmed = confirm("Regenerating will replace all existing scenes and discard your edits. Continue?");
+    if (!confirmed) return;
+    showError("");
+    const button = document.getElementById("generateBtn");
+    button.disabled = true;
+    loadingState.hidden = false;
+    try {
+        const response = await fetch(`/api/projects/${projectId}/generate-script`, {method: "POST"});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Storyboard generation failed.");
+        window.location.reload();
+    } catch (error) {
+        showError(error.message);
+        loadingState.hidden = true;
+        button.disabled = false;
+    }
+});
+
+updateSceneCounts();
+</script>
+{% endblock %}

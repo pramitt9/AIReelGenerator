@@ -1,62 +1,293 @@
+
 {% extends "base.html" %}
 
-{% block title %}Create Reel - AI Reel Generator{% endblock %}
+{% block title %}Create Reel | VidSnapAI{% endblock %}
 
-{% block extra_css %} 
-<link rel="stylesheet" href="{{ url_for('static', filename='css/create.css') }}">
+{% block extra_css %}
+<style>
+    .create-wrapper {
+        max-width: 850px;
+        margin: 0 auto;
+    }
+
+    .create-header {
+        margin-bottom: 35px;
+    }
+
+    .create-eyebrow {
+        color: var(--accent-hover);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+    }
+
+    .create-header h1 {
+        font-size: clamp(2rem, 5vw, 2.7rem);
+        font-weight: 800;
+        margin: 12px 0;
+    }
+
+    .create-panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 32px;
+    }
+
+    .field-label {
+        display: block;
+        color: var(--text-primary);
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .field-hint {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-top: 8px;
+    }
+
+    .topic-input {
+        min-height: 160px;
+        resize: vertical;
+    }
+
+    .option-card {
+        display: block;
+        height: 100%;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--bg-secondary);
+        cursor: pointer;
+        transition: 0.2s ease;
+    }
+
+    .option-card:hover {
+        border-color: var(--accent);
+    }
+
+    .option-card:has(input:checked) {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+    }
+
+    .option-card input {
+        accent-color: var(--accent);
+    }
+
+    .option-card strong {
+        display: block;
+        margin: 10px 0 4px;
+    }
+
+    .option-card small {
+        color: var(--text-secondary);
+    }
+
+    .create-submit {
+        min-width: 210px;
+        padding: 13px 22px;
+    }
+
+    .create-error {
+        color: var(--danger);
+        font-size: 0.9rem;
+        margin-top: 12px;
+    }
+
+    .create-note {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+    }
+
+    @media (max-width: 576px) {
+        .create-panel {
+            padding: 21px;
+        }
+
+        .create-submit {
+            width: 100%;
+        }
+    }
+</style>
 {% endblock %}
 
 {% block content %}
-<section class="upload-section">
-    <div class="container">
-        <div class="upload-container">
-            <h1 class="upload-title">Create Your Reel</h1>
-            <p class="upload-instructions">Upload your video files to create an amazing reel. You can upload multiple files.</p>
-            
-            <form action="/create" enctype="multipart/form-data" method="post" class="dropzone" id="myDropzone">
-                <div class="fallback">
-                    <div id="fileInputs">
-                        <div class="file-input-group">
-                            <input name="file1" type="file" class="file-input" />
-                            <input name="uuid" type="hidden" value="{{myid}}">
-                            <button type="button" class="remove-file-btn" onclick="removeFileInput(this)" disabled>×</button>
-                        </div>
-                    </div>
-                    <button type="button" class="add-file-btn" onclick="addFileInput()">+ Add File</button>
-                </div>
-                
-                <div class="text-input-container">
-                    <textarea class="text-input" id="textInput" name="text" placeholder="Enter your text to be added as voice here..." rows="4"></textarea>
-                </div>
-                
-                <button type="submit" class="submit-btn" id="submitBtn">
-                    Create Reel
-                </button>
-            </form>
+<div class="container py-5">
+
+    <div class="create-wrapper">
+
+        <div class="create-header">
+            <div class="create-eyebrow">
+                <i class="fas fa-wand-magic-sparkles me-2"></i>AI Video Studio
+            </div>
+
+            <h1>Create something amazing.</h1>
+
+            <p class="text-muted">
+                Start with an idea. Let VidSnapAI turn it into a video.
+            </p>
         </div>
+
+        <div class="create-panel">
+
+            <form id="createProjectForm">
+
+                <div class="mb-4">
+                    <label for="title" class="field-label">
+                        Project Name
+                    </label>
+
+                    <input
+                        type="text"
+                        id="title"
+                        class="form-control"
+                        placeholder="e.g. The Mystery of Black Holes"
+                        maxlength="150"
+                        required
+                    >
+
+                    <div class="field-hint">
+                        Give your video a memorable name.
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label for="topic" class="field-label">
+                        What's your video about?
+                    </label>
+
+                    <textarea
+                        id="topic"
+                        class="form-control topic-input"
+                        placeholder="Describe your idea in detail. For example: Explain how black holes form, what happens near their event horizon, and why scientists find them fascinating."
+                        maxlength="2000"
+                        required
+                    ></textarea>
+
+                    <div class="field-hint">
+                        Be descriptive. More context helps generate a better storyboard.
+                    </div>
+                </div>
+
+                <hr style="border-color: var(--border); margin: 30px 0;">
+
+                <h5 class="fw-bold mb-3">Video Preferences</h5>
+
+                <div class="row g-3 mb-4">
+
+                    <div class="col-md-6">
+                        <label for="duration" class="field-label">
+                            Approximate Duration
+                        </label>
+
+                        <select id="duration" class="form-select">
+                            <option value="30">30 seconds</option>
+                            <option value="45" selected>45 seconds</option>
+                            <option value="60">60 seconds</option>
+                            <option value="90">90 seconds</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="visualStyle" class="field-label">
+                            Visual Style
+                        </label>
+
+                        <select id="visualStyle" class="form-select">
+                            <option value="cinematic">Cinematic</option>
+                            <option value="documentary">Documentary</option>
+                            <option value="educational">Educational</option>
+                            <option value="dramatic">Dramatic</option>
+                        </select>
+                    </div>
+
+                </div>
+
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+
+                    <p class="create-note mb-0">
+                        <i class="fas fa-info-circle me-1"></i>
+                        You can review your storyboard before production.
+                    </p>
+
+                    <button type="submit" class="btn btn-primary create-submit" id="createBtn">
+                        <i class="fas fa-wand-magic-sparkles me-2"></i>
+                        Generate Storyboard
+                    </button>
+
+                </div>
+
+                <div id="createError" class="create-error" role="alert"></div>
+
+            </form>
+
+        </div>
+
     </div>
-</section>
+
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    let fileCounter = 2; // Start from 2 since we already have file1
+const form = document.getElementById("createProjectForm");
+const createBtn = document.getElementById("createBtn");
+const errorBox = document.getElementById("createError");
 
-    function addFileInput() {
-        const fileInputs = document.getElementById('fileInputs');
-        const newFileInput = document.createElement('div');
-        newFileInput.className = 'file-input-group';
-        newFileInput.innerHTML = `
-            <input name="file${fileCounter}" type="file" class="file-input" />
-            <button type="button" class="remove-file-btn" onclick="removeFileInput(this)">×</button>
-        `;
-        fileInputs.appendChild(newFileInput);
-        fileCounter++;
+form.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    const title = document.getElementById("title").value.trim();
+    const topic = document.getElementById("topic").value.trim();
+
+    errorBox.textContent = "";
+
+    if (!title || !topic) {
+        errorBox.textContent = "Please enter both a project name and topic.";
+        return;
     }
 
-    function removeFileInput(button) {
-        const fileInputGroup = button.parentElement;
-        fileInputGroup.remove();
+    createBtn.disabled = true;
+    createBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating Project...';
+
+    try {
+        const response = await fetch("/api/projects", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                title: title,
+                topic: topic
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Could not create project.");
+        }
+
+        const projectId = data.project.id;
+
+        sessionStorage.setItem(
+            "vidsnap_preferences_" + projectId,
+            JSON.stringify({
+                duration: document.getElementById("duration").value,
+                visualStyle: document.getElementById("visualStyle").value
+            })
+        );
+
+        window.location.href ="/";
+
+    } catch (error) {
+        errorBox.textContent = error.message;
+        createBtn.disabled = false;
+        createBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-2"></i>Generate Storyboard';
     }
+});
 </script>
-{% endblock %} 
+{% endblock %}

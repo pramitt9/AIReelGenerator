@@ -7,12 +7,79 @@ from elevenlabs.client import ElevenLabs
 from flask import current_app
 
 
+def build_narration_text(storyboard: dict) -> str:
+    """
+    Assemble the complete spoken narration.
+
+    Order:
+    1. Opening hook
+    2. Scene narrations
+    3. Ending
+    """
+
+    if not isinstance(storyboard, dict):
+        raise ValueError("Invalid storyboard format.")
+
+    scenes = storyboard.get("scenes", [])
+
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("Storyboard contains no scenes.")
+
+    narration_parts = []
+
+    # Opening hook
+    hook = storyboard.get("hook", "")
+
+    if hook:
+        if not isinstance(hook, str):
+            raise ValueError("Storyboard hook must be text.")
+
+        if hook.strip():
+            narration_parts.append(hook.strip())
+
+    # Scene narrations
+    for index, scene in enumerate(scenes, start=1):
+
+        if not isinstance(scene, dict):
+            raise ValueError(f"Invalid scene data at position {index}.")
+
+        scene_narration = scene.get("narration", "")
+
+        if not isinstance(scene_narration, str) or not scene_narration.strip():
+            raise ValueError(
+                f"Scene {scene.get('scene_number', index)} "
+                "has no valid narration."
+            )
+
+        narration_parts.append(scene_narration.strip())
+
+    # Ending
+    ending = storyboard.get("ending", "")
+
+    if ending:
+        if not isinstance(ending, str):
+            raise ValueError("Storyboard ending must be text.")
+
+        if ending.strip():
+            narration_parts.append(ending.strip())
+
+    narration = " ".join(narration_parts).strip()
+
+    if not narration:
+        raise ValueError("No narration text available.")
+
+    return narration
+
+
 def generate_narration(
     storyboard: dict,
     project_id: int
 ) -> dict:
     """
-    Generate narration audio from the complete storyboard.
+    Generate complete narration audio from the storyboard.
+
+    Includes the opening hook, scene narrations and ending.
+
     Returns audio file metadata.
     """
 
@@ -21,19 +88,7 @@ def generate_narration(
     if not api_key:
         raise ValueError("ElevenLabs API key is not configured.")
 
-    scenes = storyboard.get("scenes", [])
-
-    if not scenes:
-        raise ValueError("Storyboard contains no scenes.")
-
-    narration = " ".join(
-        scene["narration"].strip()
-        for scene in scenes
-        if scene.get("narration")
-    )
-
-    if not narration.strip():
-        raise ValueError("No narration text available.")
+    narration = build_narration_text(storyboard)
 
     client = ElevenLabs(api_key=api_key)
 
@@ -53,8 +108,10 @@ def generate_narration(
     )
 
     storage_dir = (
-        Path(current_app.root_path)
-        .parent / "storage" / "audio" / f"project_{project_id}"
+        Path(current_app.root_path).parent
+        / "storage"
+        / "audio"
+        / f"project_{project_id}"
     )
 
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -68,8 +125,13 @@ def generate_narration(
                 if chunk:
                     audio_file.write(chunk)
 
-        if not temporary_path.exists() or temporary_path.stat().st_size == 0:
-            raise RuntimeError("ElevenLabs returned an empty audio file.")
+        if (
+            not temporary_path.exists()
+            or temporary_path.stat().st_size == 0
+        ):
+            raise RuntimeError(
+                "ElevenLabs returned an empty audio file."
+            )
 
         os.replace(temporary_path, output_path)
 

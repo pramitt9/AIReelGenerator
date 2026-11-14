@@ -1,164 +1,301 @@
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+
 :root {
-    --primary-color: #405DE6;
-    --secondary-color: #5851DB;
-    --accent-color: #833AB4;
+    --bg-main: #0c0b12;
+    --bg-secondary: #13121c;
+    --bg-card: #191824;
+    --bg-card-hover: #201e2d;
+
+    --accent: #9466ff;
+    --accent-hover: #a783ff;
+    --accent-soft: rgba(148, 102, 255, 0.12);
+
+    --text-primary: #f5f3ff;
+    --text-secondary: #a5a1b5;
+    --border: rgba(255, 255, 255, 0.08);
+
+    --success: #35c98b;
+    --danger: #ff647c;
+}
+
+* {
+    box-sizing: border-box;
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    background: var(--bg-main);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
 }
 
-/* Navbar Styles */
-.navbar {
-    background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-    padding: 1rem 2rem;
-}
-
-.navbar-brand {
-    color: white !important;
-    font-weight: bold;
-    font-size: 1.5rem;
-}
-
-.nav-link {
-    color: rgba(255, 255, 255, 0.9) !important;
-    margin: 0 1rem;
-    transition: color 0.3s ease;
-}
-
-.nav-link:hover {
-    color: white !important;
+a {
+    text-decoration: none;
 }
 
 .main-content {
     flex: 1;
 }
 
-/* Footer Styles */
-footer {
-    background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-    color: white;
-    padding: 2rem 0;
-    margin-top: auto;
+/* Navbar */
+
+.app-navbar {
+    min-height: 76px;
+    background: rgba(12, 11, 18, 0.94);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(16px);
 }
 
-.footer-content {
+.brand-logo {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 9px;
+    color: var(--text-primary) !important;
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -0.8px;
 }
 
-.social-links a {
+.brand-logo > span:last-child {
+    color: var(--accent);
+}
+
+.brand-icon {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--accent);
     color: white;
-    margin: 0 10px;
-    font-size: 1.5rem;
-    transition: opacity 0.3s ease;
+    font-size: 13px;
 }
 
-.social-links a:hover {
-    opacity: 0.8;
+.navbar-nav {
+    gap: 10px;
 }
 
-/* Hero Section Styles */
-.hero-section {
-    background: linear-gradient(135deg, rgb(62, 62, 218), var(--accent-color));
+.app-navbar .nav-link {
+    color: var(--text-secondary);
+    padding: 10px 14px !important;
+    border-radius: 9px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: 0.2s ease;
+}
+
+.app-navbar .nav-link:hover {
     color: white;
-    padding: 6rem 0;
-    text-align: center;
+    background: var(--accent-soft);
 }
 
-.hero-title {
-    font-size: 3.5rem;
-    font-weight: bold;
-    margin-bottom: 1.5rem;
+.navbar-toggler {
+    color: white;
+    border: 1px solid var(--border);
+    padding: 8px 12px;
 }
 
-.hero-subtitle {
-    font-size: 1.5rem;
-    margin-bottom: 2rem;
-    opacity: 0.9;
+.navbar-toggler:focus {
+    box-shadow: none;
 }
 
-.cta-button {
-    background: white;
-    color: var(--primary-color);
-    padding: 1rem 2rem;
-    border-radius: 50px;
-    font-weight: bold;
-    text-decoration: none;
-    transition: transform 0.3s ease;
-    display: inline-block;
+.navbar-toggler-icon {
+    filter: invert(1);
 }
 
-.cta-button:hover {
+.navbar-user {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+}
+
+.user-avatar {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    border: 1px solid rgba(148, 102, 255, 0.35);
+    color: var(--accent-hover);
+    font-weight: 700;
+}
+
+.user-name {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.logout-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 8px;
+    transition: 0.2s ease;
+}
+
+.logout-btn:hover {
+    color: var(--danger);
+}
+
+/* General cards */
+
+.card {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border) !important;
+    border-radius: 15px;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.card .text-muted {
+    color: var(--text-secondary) !important;
+}
+
+.card-hover:hover {
+    background: var(--bg-card-hover);
     transform: translateY(-3px);
-    color: var(--primary-color);
 }
 
-/* Features Section Styles */
-.features-section {
-    padding: 5rem 0;
-    background: #f8f9fa;
+/* Typography */
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
 }
 
-.feature-card {
-    text-align: center;
-    padding: 2rem;
-    border-radius: 15px;
-    background: white;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease;
+p {
+    line-height: 1.7;
 }
 
-.feature-card:hover {
-    transform: translateY(-10px);
+/* Buttons */
+
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 10px 20px;
+    transition: 0.2s ease;
 }
 
-.feature-icon {
-    font-size: 2.5rem;
-    color: var(--primary-color);
-    margin-bottom: 1rem;
+.btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: white;
+    transform: translateY(-1px);
 }
 
-/* Showcase Section Styles */
-.showcase-section {
-    padding: 5rem 0;
+.btn-primary:focus {
+    box-shadow: 0 0 0 3px rgba(148, 102, 255, 0.25);
 }
 
-.showcase-title {
-    text-align: center;
-    margin-bottom: 3rem;
+.btn-outline-primary {
+    border-color: var(--accent);
+    color: var(--accent-hover);
 }
 
-.image-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-    padding: 0 1rem;
+.btn-outline-primary:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
 }
 
-.showcase-image {
-    width: 100%;
-    height: 300px;
-    object-fit: cover;
-    border-radius: 15px;
-    transition: transform 0.3s ease;
+/* Forms */
+
+.form-control, .form-select {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 9px;
+    padding: 11px 13px;
 }
 
-.showcase-image:hover {
-    transform: scale(1.05);
+.form-control:focus, .form-select:focus {
+    background: var(--bg-secondary);
+    border-color: var(--accent);
+    color: white;
+    box-shadow: 0 0 0 3px rgba(148, 102, 255, 0.13);
 }
 
-/* Responsive Styles */
-@media (max-width: 768px) {
-    .hero-title {
-        font-size: 2.5rem;
+.form-control::placeholder {
+    color: #777386;
+}
+
+.form-label {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+/* Badges */
+
+.badge {
+    font-weight: 600;
+    padding: 7px 10px;
+    border-radius: 7px;
+}
+
+/* Alerts */
+
+.alert {
+    border-radius: 10px;
+}
+
+/* Footer */
+
+.app-footer {
+    margin-top: 60px;
+    padding: 23px 0;
+    border-top: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+/* Responsive */
+
+@media (max-width: 991px) {
+    .navbar-nav {
+        padding: 15px 0;
     }
-    
-    .hero-subtitle {
-        font-size: 1.2rem;
+
+    .navbar-user {
+        padding: 10px 0 15px;
+        border-top: 1px solid var(--border);
     }
-} 
+}
+
+@media (max-width: 576px) {
+    .app-footer {
+        text-align: center;
+    }
+
+    .app-footer .container {
+        justify-content: center !important;
+    }
+}
+/* Dashboard text visibility */
+.container > .d-flex p.text-muted {
+    color: var(--text-secondary) !important;
+}
+
+/* Desktop navbar */
+@media (min-width: 992px) {
+    .navbar-toggler {
+        display: none;
+    }
+}
+/* Improve secondary text visibility across all pages */
+.text-muted {
+    color: var(--text-secondary) !important;
+}
+
+.create-note {
+    color: var(--text-secondary) !important;
+}

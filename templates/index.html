@@ -1,55 +1,151 @@
+
 {% extends "base.html" %}
 
-{% block title %}AI Reel Generator - Create Amazing Instagram Reels{% endblock %}
+{% block title %}Dashboard | VidSnapAI{% endblock %}
 
 {% block content %}
-<section class="hero-section">
-    <div class="container">
-        <h1 class="hero-title">Create Amazing Instagram Reels with AI</h1>
-        <p class="hero-subtitle">Transform your videos into engaging reels with our AI-powered platform</p>
-        <a href="/create" class="cta-button">Start Creating Now</a>
-    </div>
-</section>
+<div class="container py-5">
 
-<section class="features-section">
-    <div class="container">
-        <div class="row g-4">
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <i class="fas fa-magic feature-icon"></i>
-                    <h3>AI-Powered Editing</h3>
-                    <p>Let our AI analyze and enhance your videos automatically</p>
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-5 gap-3">
+        <div>
+            <h1 class="fw-bold mb-2">Your Creative Studio</h1>
+            <p class="text-muted mb-0">
+                Welcome back, {{ current_user.username }}.
+                Turn an idea into a complete video reel with AI.
+            </p>
+        </div>
+
+        <a href="{{ url_for('main.create_page') }}" class="btn btn-primary btn-lg">
+            <i class="fas fa-plus me-2"></i>Create New Reel
+        </a>
+    </div>
+
+    <!-- Statistics -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <p class="text-muted mb-2">Total Projects</p>
+                    <h2 class="fw-bold mb-0">{{ projects|length }}</h2>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <i class="fas fa-film feature-icon"></i>
-                    <h3>Smart Stitching</h3>
-                    <p>Seamlessly combine multiple clips into perfect reels</p>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <p class="text-muted mb-2">Completed Projects</p>
+                    <h2 class="fw-bold mb-0">
+                        {{ projects|selectattr('status', 'equalto', 'completed')|list|length }}
+                    </h2>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <i class="fas fa-music feature-icon"></i>
-                    <h3>Music Integration</h3>
-                    <p>Add trending music and sound effects to your reels</p>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <p class="text-muted mb-2">In Progress</p>
+                    <h2 class="fw-bold mb-0">
+                        {{ projects|selectattr('status', 'equalto', 'processing')|list|length }}
+                    </h2>
                 </div>
             </div>
         </div>
     </div>
-</section>
 
-<section class="showcase-section">
-    <div class="container">
-        <h2 class="showcase-title">Featured Creations</h2>
-        <div class="image-grid">
-            <img src="{{ url_for('static', filename='1.jpg') }}" alt="Reel Example 1" class="showcase-image">
-            <img src="{{ url_for('static', filename='2.jpg') }}" alt="Reel Example 2" class="showcase-image">
-            <img src="{{ url_for('static', filename='3.jpg') }}" alt="Reel Example 3" class="showcase-image">
-            <img src="{{ url_for('static', filename='4.jpg') }}" alt="Reel Example 4" class="showcase-image">
-            <img src="{{ url_for('static', filename='5.jpg') }}" alt="Reel Example 5" class="showcase-image">
+    <!-- Features -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-muted mb-2">AI Script Generation</div>
+                    <h5 class="fw-bold">From idea to story</h5>
+                    <p class="text-muted mb-0">
+                        Generate a structured storyboard from a simple topic.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-muted mb-2">Automated Production</div>
+                    <h5 class="fw-bold">Footage, voice and music</h5>
+                    <p class="text-muted mb-0">
+                        Bring scenes together with AI narration and visuals.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <div class="text-muted mb-2">Final Output</div>
+                    <h5 class="fw-bold">Ready-to-watch reels</h5>
+                    <p class="text-muted mb-0">
+                        Create vertical videos with motion and subtitles.
+                    </p>
+                </div>
+            </div>
         </div>
     </div>
-</section>
+
+    <!-- Recent Projects -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="fw-bold mb-0">Recent Projects</h3>
+        <a href="{{ url_for('main.gallery') }}" class="text-decoration-none">
+            View Gallery <i class="fas fa-arrow-right ms-1"></i>
+        </a>
+    </div>
+
+    {% if projects %}
+        <div class="row g-3">
+            {% for project in projects %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body p-4">
+                            <h5 class="fw-bold">{{ project.title }}</h5>
+
+                            <p class="text-muted small mb-3">
+                                {{ project.topic }}
+                            </p>
+
+                            {% if project.status == 'completed' %}
+                                <span class="badge bg-success">Completed</span>
+                            {% elif project.status == 'processing' %}
+                                <span class="badge bg-primary">Processing</span>
+                            {% elif project.status == 'failed' %}
+                                <span class="badge bg-danger">Failed</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Draft</span>
+                            {% endif %}
+
+                            <p class="text-muted small mt-3 mb-0">
+                                Created: {{ project.created_at.strftime('%d %b %Y') }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-film fa-3x text-muted mb-3"></i>
+                <h5 class="fw-bold">Your next reel starts here</h5>
+                <p class="text-muted">
+                    You haven't created any projects yet.
+                </p>
+                <a href="{{ url_for('main.create_page') }}" class="btn btn-primary">
+                    Create Your First Reel
+                </a>
+            </div>
+        </div>
+    {% endif %}
+
+</div>
 {% endblock %}
- 
