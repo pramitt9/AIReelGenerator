@@ -1,5 +1,8 @@
 
+import json
 import os
+import subprocess
+import uuid
 from pathlib import Path
 
 from elevenlabs import VoiceSettings
@@ -8,14 +11,7 @@ from flask import current_app
 
 
 def build_narration_text(storyboard: dict) -> str:
-    """
-    Assemble the complete spoken narration.
-
-    Order:
-    1. Opening hook
-    2. Scene narrations
-    3. Ending
-    """
+    """Assemble hook, scene narrations and ending into one narration."""
 
     if not isinstance(storyboard, dict):
         raise ValueError("Invalid storyboard format.")
@@ -27,7 +23,6 @@ def build_narration_text(storyboard: dict) -> str:
 
     narration_parts = []
 
-    # Opening hook
     hook = storyboard.get("hook", "")
 
     if hook:
@@ -37,9 +32,7 @@ def build_narration_text(storyboard: dict) -> str:
         if hook.strip():
             narration_parts.append(hook.strip())
 
-    # Scene narrations
     for index, scene in enumerate(scenes, start=1):
-
         if not isinstance(scene, dict):
             raise ValueError(f"Invalid scene data at position {index}.")
 
@@ -53,7 +46,6 @@ def build_narration_text(storyboard: dict) -> str:
 
         narration_parts.append(scene_narration.strip())
 
-    # Ending
     ending = storyboard.get("ending", "")
 
     if ending:
@@ -71,16 +63,72 @@ def build_narration_text(storyboard: dict) -> str:
     return narration
 
 
+def validate_audio_file(audio_path: Path) -> dict:
+    """Verify that FFprobe can read the generated audio file."""
+
+    if not audio_path.is_file() or audio_path.stat().st_size == 0:
+        raise RuntimeError("Generated narration file is missing or empty.")
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "stream=codec_type,codec_name",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                str(audio_path)
+            ],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "FFprobe was not found. Make sure FFmpeg is installed "
+            "and available in PATH."
+        ) from exc
+
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"FFprobe could not validate narration: {exc.stderr.strip()}"
+        ) from exc
+
+    try:
+        metadata = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("FFprobe returned invalid audio metadata.") from exc
+
+    streams = metadata.get("streams", [])
+    audio_streams = [
+        stream for stream in streams
+        if stream.get("codec_type") == "audio"
+    ]
+
+    if not audio_streams:
+        raise RuntimeError("Generated file contains no valid audio stream.")
+
+    duration = float(metadata.get("format", {}).get("duration", 0))
+
+    if duration <= 0:
+        raise RuntimeError("Generated narration has an invalid duration.")
+
+    return {
+        "duration": duration,
+        "codec": audio_streams[0].get("codec_name")
+    }
+
+
 def generate_narration(
     storyboard: dict,
-    project_id: int
+    project_id: int,
+    output_path: str | None = None
 ) -> dict:
     """
     Generate complete narration audio from the storyboard.
 
-    Includes the opening hook, scene narrations and ending.
-
-    Returns audio file metadata.
+    Supports a custom output path for isolated generation jobs.
     """
 
     api_key = current_app.config.get("ELEVENLABS_API_KEY")
@@ -107,17 +155,22 @@ def generate_narration(
         )
     )
 
-    storage_dir = (
-        Path(current_app.root_path).parent
-        / "storage"
-        / "audio"
-        / f"project_{project_id}"
+    if output_path:
+        final_path = Path(output_path)
+    else:
+        storage_dir = (
+            Path(current_app.root_path).parent
+            / "storage"
+            / "audio"
+            / f"project_{project_id}"
+        )
+        final_path = storage_dir / "narration.mp3"
+
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary_path = final_path.with_name(
+        f"{final_path.stem}.{uuid.uuid4().hex}.tmp.mp3"
     )
-
-    storage_dir.mkdir(parents=True, exist_ok=True)
-
-    output_path = storage_dir / "narration.mp3"
-    temporary_path = storage_dir / "narration.tmp.mp3"
 
     try:
         with temporary_path.open("wb") as audio_file:
@@ -125,15 +178,10 @@ def generate_narration(
                 if chunk:
                     audio_file.write(chunk)
 
-        if (
-            not temporary_path.exists()
-            or temporary_path.stat().st_size == 0
-        ):
-            raise RuntimeError(
-                "ElevenLabs returned an empty audio file."
-            )
+        audio_metadata = validate_audio_file(temporary_path)
 
-        os.replace(temporary_path, output_path)
+        # Replace the destination only after the new audio is validated.
+        os.replace(temporary_path, final_path)
 
     except Exception:
         temporary_path.unlink(missing_ok=True)
@@ -141,8 +189,10 @@ def generate_narration(
 
     return {
         "project_id": project_id,
-        "audio_path": str(output_path.resolve()),
+        "audio_path": str(final_path.resolve()),
         "narration": narration,
-        "file_size": output_path.stat().st_size,
+        "file_size": final_path.stat().st_size,
+        "duration": audio_metadata["duration"],
+        "codec": audio_metadata["codec"],
         "voice_id": voice_id
     }

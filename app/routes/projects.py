@@ -108,6 +108,20 @@ def renumber_scenes(scenes):
 
     db.session.flush()
 
+def invalidate_completed_output(project):
+    """
+    Mark previous generated videos as outdated after storyboard edits.
+    """
+
+    completed_jobs = GenerationJob.query.filter_by(
+        project_id=project.id,
+        status="completed"
+    ).all()
+
+    for job in completed_jobs:
+        job.status = "superseded"
+
+    project.status = "draft"
 
 # ---------------------------------------------------------
 # Create project
@@ -373,6 +387,7 @@ def generate_project_script(project_id):
         project.script = json.dumps(storyboard)
 
         db.session.add_all(new_scenes)
+        invalidate_completed_output(project)
         db.session.commit()
 
         # Clean up old footage after successful storyboard replacement.
@@ -482,6 +497,19 @@ def update_scene(project_id, scene_id):
 
     data = request.get_json(silent=True) or {}
 
+    old_asset_path = scene.asset_path
+
+    new_visual_description = data.get("visual_description")
+    new_visual_type = data.get("visual_type")
+
+    visual_changed = (
+        isinstance(new_visual_description, str)
+        and new_visual_description.strip() != scene.visual_description
+    ) or (
+        new_visual_type is not None
+        and new_visual_type != scene.visual_type
+    )
+
     narration = data.get("narration")
     visual_description = data.get("visual_description")
     duration = data.get("duration")
@@ -544,9 +572,31 @@ def update_scene(project_id, scene_id):
             .all()
         )
 
+        if visual_changed:
+            scene.provider = None
+            scene.provider_video_id = None
+            scene.asset_url = None
+            scene.asset_path = None
+            scene.thumbnail_url = None
+            scene.width = None
+            scene.height = None
+            scene.status = "pending"
+            scene.error_message = None
+
+        invalidate_completed_output(project)
+
         sync_storyboard_scenes(project, scenes)
 
         db.session.commit()
+        if visual_changed and old_asset_path:
+            try:
+                delete_video(old_asset_path, project_id)
+            except Exception:
+                current_app.logger.exception(
+                    "Could not delete outdated footage for scene %s",
+                    scene_id
+                )
+
 
         return jsonify({
             "message": "Scene updated successfully",
@@ -654,6 +704,7 @@ def add_scene(project_id):
         existing_scenes.append(scene)
 
         sync_storyboard_scenes(project, existing_scenes)
+        invalidate_completed_output(project)
 
         db.session.commit()
 
@@ -723,6 +774,7 @@ def delete_scene(project_id, scene_id):
 
         # Synchronize the saved storyboard.
         sync_storyboard_scenes(project, scenes)
+        invalidate_completed_output(project)
 
         # Commit database changes before deleting the physical file.
         db.session.commit()
@@ -831,6 +883,7 @@ def reorder_scenes(project_id):
         renumber_scenes(ordered_scenes)
 
         sync_storyboard_scenes(project, ordered_scenes)
+        invalidate_completed_output(project)
 
         db.session.commit()
 
@@ -900,6 +953,7 @@ def update_storyboard_text(project_id):
             storyboard["ending"] = ending.strip()
 
         project.script = json.dumps(storyboard)
+        invalidate_completed_output(project)
 
         db.session.commit()
 

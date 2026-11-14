@@ -1,6 +1,9 @@
 
+import json
 import os
 import subprocess
+import uuid
+from pathlib import Path
 
 
 def format_ass_time(seconds: float) -> str:
@@ -16,6 +19,7 @@ def format_ass_time(seconds: float) -> str:
 
 def escape_ass_text(text: str) -> str:
     """Escape special ASS text characters."""
+
     return (
         text.replace("\\", "\\\\")
         .replace("{", "\\{")
@@ -25,12 +29,7 @@ def escape_ass_text(text: str) -> str:
 
 
 def create_caption_groups(words: list[dict]) -> list[list[dict]]:
-    """
-    Group words into readable caption chunks.
-
-    Break after punctuation, long pauses, or a maximum
-    number of words/characters.
-    """
+    """Group words into readable caption chunks."""
 
     groups = []
     current_group = []
@@ -67,7 +66,7 @@ def generate_ass_subtitles(
     words: list[dict],
     output_path: str
 ) -> dict:
-    """Generate an ASS subtitle file with animated word highlighting."""
+    """Generate ASS subtitles with animated word highlighting."""
 
     if not words:
         raise ValueError("No word timestamps provided.")
@@ -77,7 +76,7 @@ def generate_ass_subtitles(
     groups = create_caption_groups(words)
 
     header = """[Script Info]
-Title: AI Reel Generator Captions
+Title: VidSnapAI Captions
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -132,7 +131,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
 
-
 def render_subtitles(
     video_path: str,
     audio_path: str,
@@ -140,7 +138,11 @@ def render_subtitles(
     output_path: str,
     subtitle_path: str = None
 ) -> dict:
-    """Burn synchronized captions into video and add the final audio."""
+    """
+    Burn synchronized captions into video and add final audio.
+
+    The final output is replaced only after FFprobe validation.
+    """
 
     for path, label in [
         (video_path, "Video"),
@@ -149,21 +151,34 @@ def render_subtitles(
         if not os.path.isfile(path):
             raise FileNotFoundError(f"{label} not found: {path}")
 
+    output = Path(output_path).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
     if subtitle_path is None:
-        subtitle_path = os.path.splitext(output_path)[0] + ".ass"
+        subtitle_path = str(
+            output.parent / f"{output.stem}.ass"
+        )
 
-    subtitle_result = generate_ass_subtitles(words, subtitle_path)
+    subtitle_file = Path(subtitle_path).resolve()
 
-    escaped_path = os.path.abspath(subtitle_path)
-    escaped_path = escaped_path.replace("\\", "/")
+    temporary_output = output.with_name(
+        f"{output.stem}.{uuid.uuid4().hex}.tmp{output.suffix}"
+    )
+
+    subtitle_result = generate_ass_subtitles(
+        words,
+        str(subtitle_file)
+    )
+
+    escaped_path = str(subtitle_file).replace("\\", "/")
     escaped_path = escaped_path.replace(":", r"\:")
     escaped_path = escaped_path.replace("'", r"\'")
 
     command = [
         "ffmpeg",
         "-y",
-        "-i", video_path,
-        "-i", audio_path,
+        "-i", str(Path(video_path).resolve()),
+        "-i", str(Path(audio_path).resolve()),
         "-map", "0:v:0",
         "-map", "1:a:0",
         "-vf", f"ass='{escaped_path}'",
@@ -175,7 +190,7 @@ def render_subtitles(
         "-shortest",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        output_path
+        str(temporary_output)
     ]
 
     try:
@@ -186,22 +201,74 @@ def render_subtitles(
             check=True
         )
 
+        if (
+            not temporary_output.is_file()
+            or temporary_output.stat().st_size == 0
+        ):
+            raise RuntimeError(
+                "Subtitle rendering produced an empty output."
+            )
+
+        probe_command = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries",
+            "stream=codec_type,width,height:format=duration",
+            "-of", "json",
+            str(temporary_output)
+        ]
+
+        probe_result = subprocess.run(
+            probe_command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        probe_data = json.loads(probe_result.stdout)
+
+        streams = probe_data.get("streams", [])
+
+        has_video = any(
+            stream.get("codec_type") == "video"
+            for stream in streams
+        )
+
+        has_audio = any(
+            stream.get("codec_type") == "audio"
+            for stream in streams
+        )
+
+        duration = float(
+            probe_data.get("format", {}).get("duration", 0)
+        )
+
+        if not has_video or not has_audio or duration <= 0:
+            raise RuntimeError(
+                "Final video failed validation. "
+                "Expected valid video and audio streams."
+            )
+
+        os.replace(temporary_output, output)
+
     except FileNotFoundError as error:
-        raise RuntimeError("FFmpeg was not found in PATH.") from error
+        raise RuntimeError(
+            "FFmpeg or FFprobe was not found in PATH."
+        ) from error
 
     except subprocess.CalledProcessError as error:
         raise RuntimeError(
-            f"Subtitle rendering failed:\n{error.stderr[-4000:]}"
+            f"Subtitle rendering or validation failed:\n"
+            f"{error.stderr[-4000:]}"
         ) from error
 
-    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError("Subtitle rendering produced no output.")
+    finally:
+        temporary_output.unlink(missing_ok=True)
 
     return {
-        "output_path": output_path,
-        "file_size": os.path.getsize(output_path),
+        "output_path": str(output),
+        "file_size": output.stat().st_size,
         "word_count": subtitle_result["word_count"],
         "caption_groups": subtitle_result["caption_groups"],
-        "subtitle_path": subtitle_path
+        "subtitle_path": str(subtitle_file)
     }
-

@@ -1,12 +1,14 @@
 
 import os
 import subprocess
+import uuid
+from pathlib import Path
 
 
 def mix_audio(
-    narration_path:str,
+    narration_path: str,
     music_path: str,
-    output_path :str,
+    output_path: str,
     music_volume: float = 0.18,
     voice_volume: float = 1.0,
 ) -> dict:
@@ -33,7 +35,12 @@ def mix_audio(
     if not 0 <= voice_volume <= 2:
         raise ValueError("voice_volume must be between 0 and 2.")
 
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    output = Path(output_path).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary_path = output.with_name(
+        f"{output.stem}.{uuid.uuid4().hex}.tmp{output.suffix}"
+    )
 
     filter_complex = (
         f"[0:a]volume={voice_volume}[voice];"
@@ -52,19 +59,19 @@ def mix_audio(
     command = [
         "ffmpeg",
         "-y",
-        "-i", narration_path,
+        "-i", str(Path(narration_path).resolve()),
         "-stream_loop", "-1",
-        "-i", music_path,
+        "-i", str(Path(music_path).resolve()),
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-c:a", "libmp3lame",
         "-b:a", "192k",
         "-ar", "44100",
-        output_path
+        str(temporary_path)
     ]
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -72,30 +79,57 @@ def mix_audio(
             check=True
         )
 
-    except FileNotFoundError:
-        raise RuntimeError(
-            "FFmpeg was not found. Make sure FFmpeg is installed "
-            "and available in PATH."
+        if (
+            not temporary_path.is_file()
+            or temporary_path.stat().st_size == 0
+        ):
+            raise RuntimeError(
+                "Audio mixing produced an empty output file."
+            )
+
+        # Verify that FFprobe can read an audio stream.
+        probe_command = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(temporary_path)
+        ]
+
+        probe_result = subprocess.run(
+            probe_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
         )
 
+        if "audio" not in probe_result.stdout.lower():
+            raise RuntimeError(
+                "Mixed audio does not contain a valid audio stream."
+            )
+
+        # Promote the validated file.
+        os.replace(temporary_path, output)
+
+    except FileNotFoundError as error:
+        raise RuntimeError(
+            "FFmpeg or FFprobe was not found. "
+            "Make sure both are installed and available in PATH."
+        ) from error
+
     except subprocess.CalledProcessError as error:
         raise RuntimeError(
-            f"Audio mixing failed:\n{error.stderr[-3000:]}"
+            f"Audio processing failed:\n{error.stderr[-3000:]}"
         ) from error
-    except subprocess.CalledProcessError as error:
-             raise RuntimeError(
-                 f"Audio mixing failed:\n{error.stderr[-3000:]}"
-            ) from error
 
-
-    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError("Audio mixing produced no valid output file.")
-
-    
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
     return {
-        "output_path": output_path,
-        "file_size": os.path.getsize(output_path),
+        "output_path": str(output),
+        "file_size": output.stat().st_size,
         "music_volume": music_volume,
         "voice_volume": voice_volume,
         "ducking_enabled": True
