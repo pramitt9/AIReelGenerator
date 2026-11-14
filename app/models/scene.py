@@ -30,6 +30,12 @@ class Scene(db.Model):
 
     duration = db.Column(db.Float, nullable=False)
 
+    camera_motion = db.Column(
+        db.String(20),
+        default="none",
+        nullable=False
+    )
+
     # Asset information
     provider = db.Column(db.String(50))
     provider_video_id = db.Column(db.String(100))

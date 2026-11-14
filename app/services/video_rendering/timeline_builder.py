@@ -56,7 +56,8 @@ def build_timeline(scenes: list[dict], word_timestamps: dict) -> dict:
             "asset_path": scene["asset_path"],
             "words": matched_words,
             "start": matched_words[0]["start"],
-            "speech_end": matched_words[-1]["end"]
+            "speech_end": matched_words[-1]["end"],
+            "camera_motion": scene.get("camera_motion", "none")
         })
 
         word_index += expected_word_count

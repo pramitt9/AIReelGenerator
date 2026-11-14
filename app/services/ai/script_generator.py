@@ -33,7 +33,8 @@ def generate_script(topic: str) -> dict:
                 "narration": "What the narrator says",
                 "visual_description": "Detailed description of what viewers should see",
                 "visual_type": "stock_video",
-                "duration": 5
+                "duration": 5,
+                "camera_motion": "zoom_in"
             }
         ],
         "ending": "Closing narration"
@@ -48,7 +49,15 @@ def generate_script(topic: str) -> dict:
     - Use ai_generated only when a suitable real-world visual is unlikely.
     - Make the opening hook compelling.
     - Ensure narration flows naturally between scenes.
-    """
+    - Assign exactly one camera_motion to every scene.
+    - Allowed values: none, zoom_in, zoom_out, pan.
+    - Choose movement based on the visual content and narrative.
+    - Use zoom_in for dramatic reveals and important subjects.
+    - Use zoom_out for establishing shots and broader context.
+    - Use pan for landscapes, environments and wide scenes.
+    - Use none for fast action or footage that already has strong movement.
+    - Avoid repeating the same movement for every scene.
+        """
 
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -76,5 +85,15 @@ def generate_script(topic: str) -> dict:
 
     if not isinstance(result.get("scenes"), list) or not result["scenes"]:
         raise ValueError("Generated storyboard contains no scenes.")
+
+    allowed_motions = {"none", "zoom_in", "zoom_out", "pan"}
+
+    for scene in result["scenes"]:
+        motion = scene.get("camera_motion", "none")
+
+        if motion not in allowed_motions:
+            motion = "none"
+
+        scene["camera_motion"] = motion
 
     return result

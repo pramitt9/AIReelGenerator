@@ -62,6 +62,7 @@ def render_video(
     command = ["ffmpeg", "-y"]
     filters = []
     durations = []
+    scene_motions = []
 
     # Prepare each scene independently.
     for index, scene in enumerate(scenes):
@@ -87,6 +88,21 @@ def render_video(
 
         frame_count = max(1, round(duration * fps))
 
+        scene_motion = scene.get("camera_motion", motion)
+
+        if scene_motion not in {
+            "none", "zoom_in", "zoom_out", "pan"
+        }:
+            raise ValueError(
+                f"Invalid camera motion for scene "
+                f"{scene.get('scene_number')}: {scene_motion}"
+            )
+
+        scene_motions.append({
+            "scene_number": scene.get("scene_number"),
+            "camera_motion": scene_motion
+        })
+
         command.extend([
             "-stream_loop", "-1",
             "-i", asset_path
@@ -104,7 +120,7 @@ def render_video(
             "setsar=1"
         )
 
-        if motion == "zoom_in":
+        if scene_motion == "zoom_in":
             increment = motion_strength / frame_count
 
             motion_filter = (
@@ -116,7 +132,7 @@ def render_video(
                 f"d=1:s={width}x{height}:fps={fps}"
             )
 
-        elif motion == "zoom_out":
+        elif scene_motion == "zoom_out":
             decrement = motion_strength / frame_count
 
             motion_filter = (
@@ -128,7 +144,7 @@ def render_video(
                 f"d=1:s={width}x{height}:fps={fps}"
             )
 
-        elif motion == "pan":
+        elif scene_motion == "pan":
             motion_filter = (
                 f",zoompan="
                 f"z='1+{motion_strength:.4f}':"
@@ -306,6 +322,7 @@ def render_video(
         "fps": fps,
         "duration": rendered_duration,
         "motion": motion,
+        "scene_motions":scene_motions,
         "motion_strength": motion_strength,
         "transition": transition,
         "transition_duration": transition_duration

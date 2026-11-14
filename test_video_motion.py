@@ -24,6 +24,7 @@ def get_duration(path):
         text=True,
         check=True
     )
+
     return float(result.stdout.strip())
 
 
@@ -31,6 +32,7 @@ def main():
     app = create_app()
 
     with app.app_context():
+
         scene_records = (
             db.session.query(Scene)
             .filter_by(project_id=4)
@@ -38,17 +40,27 @@ def main():
             .all()
         )
 
+        if not scene_records:
+            raise RuntimeError("No scenes found for project 4.")
+
+        # Assign test camera movements and save them to the database.
+        motions = ["zoom_in", "pan", "none", "zoom_out"]
+
+        for index, scene in enumerate(scene_records):
+            scene.camera_motion = motions[index % len(motions)]
+
+        db.session.commit()
+
+        # Retrieve camera movements from the database.
         scenes = [
             {
                 "scene_number": scene.scene_number,
                 "narration": scene.narration,
-                "asset_path": scene.asset_path
+                "asset_path": scene.asset_path,
+                "camera_motion": scene.camera_motion
             }
             for scene in scene_records
         ]
-
-    if not scenes:
-        raise RuntimeError("No scenes found for project 4.")
 
     print("Generating word timestamps...")
 
@@ -57,35 +69,62 @@ def main():
     )
 
     print("Building timeline...")
+
     timeline = build_timeline(scenes, timestamps)
 
-    os.makedirs("storage/rendered/project_4", exist_ok=True)
+    print("\n===== DATABASE TO TIMELINE VERIFICATION =====")
 
-    motion_modes = ["none", "zoom_in", "zoom_out", "pan"]
-
-    for motion in motion_modes:
-        output_path = (
-            f"storage/rendered/project_4/motion_{motion}.mp4"
+    for scene in timeline["scenes"]:
+        print(
+            f"Scene {scene['scene_number']}: "
+            f"{scene['camera_motion']}"
         )
 
-        print(f"\nRendering motion: {motion}")
+    # Verify that timeline preserved database values.
+    for original, timeline_scene in zip(scenes, timeline["scenes"]):
+        assert (
+            original["camera_motion"] == timeline_scene["camera_motion"]
+        ), f"Camera motion mismatch in scene {original['scene_number']}"
 
-        result = render_video(
-            timeline=timeline,
-            output_path=output_path,
-            motion=motion,
-            motion_strength=0.08,
-            transition="cut"
+    output_directory = "storage/rendered/project_4"
+    os.makedirs(output_directory, exist_ok=True)
+
+    output_path = os.path.join(
+        output_directory,
+        "database_mixed_motion.mp4"
+    )
+
+    print("\nRendering video using database camera motions...")
+
+    result = render_video(
+        timeline=timeline,
+        output_path=output_path,
+        motion="none",
+        motion_strength=0.08,
+        transition="cut"
+    )
+
+    actual_duration = get_duration(output_path)
+
+    print("\n===== RENDERING RESULTS =====")
+
+    print("Output:", result["output_path"])
+    print(f"Size: {result['file_size'] / (1024 * 1024):.2f} MB")
+    print(f"Reported duration: {result['duration']:.3f}s")
+    print(f"Actual duration: {actual_duration:.3f}s")
+
+    print("\n===== RENDERER MOTION REPORT =====")
+
+    for item in result["scene_motions"]:
+        print(
+            f"Scene {item['scene_number']}: "
+            f"{item['camera_motion']}"
         )
 
-        actual_duration = get_duration(output_path)
+    print("\nAll database-to-renderer checks passed!")
 
-        print(f"Output: {result['output_path']}")
-        print(f"Size: {result['file_size'] / (1024 * 1024):.2f} MB")
-        print(f"Reported duration: {result['duration']:.3f}s")
-        print(f"Actual duration: {actual_duration:.3f}s")
-
-    print("\nAll motion tests completed.")
+    with app.app_context():
+        db.session.remove()
 
 
 if __name__ == "__main__":

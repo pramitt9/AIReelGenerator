@@ -16,82 +16,101 @@ storyboard = {
             "narration": "Artificial intelligence is transforming our cities.",
             "visual_description": "Futuristic smart city with technology",
             "visual_type": "stock_video",
-            "duration": 5
+            "duration": 5,
+            "camera_motion": "zoom_in"
         },
         {
             "scene_number": 2,
             "narration": "Machines are learning to perform complex tasks.",
             "visual_description": "Industrial robotic arms working in a factory",
             "visual_type": "stock_video",
-            "duration": 5
+            "duration": 5,
+            "camera_motion": "pan"
         },
         {
             "scene_number": 3,
             "narration": "The future of AI is still being written.",
             "visual_description": "Computer scientist working with artificial intelligence",
             "visual_type": "stock_video",
-            "duration": 5
+            "duration": 5,
+            "camera_motion": "zoom_out"
         }
     ]
 }
 
 
-with app.app_context():
+def main():
+    with app.app_context():
 
-    db.create_all()
+        db.create_all()
 
-    user = User.query.first()
+        user = User.query.first()
 
-    if not user:
-        user = User(
-            username="processor_test",
-            email="processor_test@example.com"
+        if not user:
+            user = User(
+                username="processor_test",
+                email="processor_test@example.com"
+            )
+            user.set_password("testpassword123")
+            db.session.add(user)
+            db.session.commit()
+
+        project = Project(
+            title="Scene Processor Test",
+            topic="Artificial Intelligence",
+            user_id=user.id
         )
-        user.set_password("testpassword123")
-        db.session.add(user)
+
+        db.session.add(project)
         db.session.commit()
 
-    project = Project(
-        title="Scene Processor Test",
-        topic="Artificial Intelligence",
-        user_id=user.id
-    )
+        project_id = project.id
 
-    db.session.add(project)
-    db.session.commit()
+        print("Processing project:", project_id)
 
-    project_id = project.id
+        result = process_storyboard(project_id, storyboard)
 
-    print("Processing project:", project_id)
+        print("\n===== PROCESSING SUMMARY =====")
+        print("Total:", result["total"])
+        print("Completed:", result["completed"])
+        print("Needs visual:", result["needs_visual"])
+        print("Failed:", result["failed"])
 
-    result = process_storyboard(project_id, storyboard)
+        for item in result["results"]:
+            print("\nScene:", item["scene_number"])
+            print("Status:", item["status"])
 
-    print("\n===== PROCESSING SUMMARY =====")
-    print("Total:", result["total"])
-    print("Completed:", result["completed"])
-    print("Needs visual:", result["needs_visual"])
-    print("Failed:", result["failed"])
+            if item.get("asset_path"):
+                print("Asset:", item["asset_path"])
 
-    for item in result["results"]:
-        print("\nScene:", item["scene_number"])
-        print("Status:", item["status"])
+            if item.get("error"):
+                print("Error:", item["error"])
 
-        if item.get("asset_path"):
-            print("Asset:", item["asset_path"])
+        print("\n===== DATABASE VERIFICATION =====")
 
-        if item.get("error"):
-            print("Error:", item["error"])
+        saved_project = db.session.get(Project, project_id)
 
-    print("\n===== DATABASE VERIFICATION =====")
+        for scene in saved_project.scenes:
+            print(f"\nScene: {scene.scene_number}")
+            print("Status:", scene.status)
+            print("Provider video ID:", scene.provider_video_id)
+            print("Asset:", scene.asset_path)
+            print("Camera motion:", scene.camera_motion)
 
-    saved_project = db.session.get(Project, project_id)
+            expected_motion = next(
+                item["camera_motion"]
+                for item in storyboard["scenes"]
+                if item["scene_number"] == scene.scene_number
+            )
 
-    for scene in saved_project.scenes:
-        print(
-            scene.scene_number,
-            scene.status,
-            scene.provider_video_id,
-            scene.asset_path
-        )
+            assert scene.camera_motion == expected_motion, (
+                f"Camera motion mismatch in scene {scene.scene_number}"
+            )
 
-    db.session.remove()
+        print("\nAll camera motion database checks passed!")
+
+        db.session.remove()
+
+
+if __name__ == "__main__":
+    main()

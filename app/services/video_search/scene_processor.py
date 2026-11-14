@@ -32,6 +32,13 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         "results": []
     }
 
+    allowed_motions = {
+        "none",
+        "zoom_in",
+        "zoom_out",
+        "pan"
+    }
+
     for index, scene_data in enumerate(scenes_data, start=1):
 
         scene_number = scene_data.get("scene_number", index)
@@ -45,6 +52,18 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         visual_type = scene_data.get(
             "visual_type", "stock_video"
         )
+
+        allowed_motions = {
+            "none",
+            "zoom_in",
+            "zoom_out",
+            "pan"
+        }
+
+        camera_motion = scene_data.get("camera_motion", "none")
+
+        if camera_motion not in allowed_motions:
+            camera_motion = "none"
 
         if not narration or not visual_description:
             summary["failed"] += 1
@@ -70,7 +89,8 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     visual_description=visual_description,
                     visual_type=visual_type,
                     duration=duration,
-                    status="pending"
+                    status="pending",
+                    camera_motion=camera_motion
                 )
                 db.session.add(scene)
                 db.session.commit()
@@ -80,6 +100,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 scene.visual_description = visual_description
                 scene.visual_type = visual_type
                 scene.duration = duration
+                scene.camera_motion = camera_motion
 
             # Skip downloading an asset that already exists.
             if scene.asset_path and os.path.isfile(scene.asset_path):
