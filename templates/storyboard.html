@@ -237,9 +237,19 @@
         </div>
 
         <div class="storyboard-panel">
-            <h5 class="fw-bold">Ready for production?</h5>
-            <p class="text-muted mb-0">Review and save your hook, ending and scene changes before moving to video generation.</p>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+            <h5 class="fw-bold mb-1">Ready for production?</h5>
+            <p class="text-muted mb-0">
+                Save your changes and generate your finished video.
+            </p>
         </div>
+        <button type="button" class="btn btn-success btn-lg" id="generateVideoBtn">
+            <i class="fas fa-play me-2"></i>Generate Video
+        </button>
+    </div>
+    <div id="generationStatus" class="mt-3" role="status"></div>
+</div>
     </div>
 </div>
 {% endblock %}
@@ -274,6 +284,105 @@ function showSuccess(message) {
     globalError.textContent = "";
     globalSuccess.textContent = message || "";
 }
+async function generateVideo() {
+    const button = document.getElementById("generateVideoBtn");
+    const status = document.getElementById("generationStatus");
+
+    if (!confirm("Generate the video using your saved storyboard? This may consume API credits.")) {
+        return;
+    }
+
+    button.disabled = true;
+    status.textContent = "Saving storyboard changes...";
+    showError("");
+
+    try {
+        // Save every scene before generation.
+        const cards = [...sceneContainer.querySelectorAll(".scene-card")];
+
+        for (const card of cards) {
+            const sceneId = card.dataset.sceneId;
+
+            const response = await fetch(
+                `/api/projects/${projectId}/scenes/${sceneId}`,
+                {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        narration: card.querySelector(".narration-input").value,
+                        visual_description: card.querySelector(".visual-input").value,
+                        duration: card.querySelector(".duration-input").value,
+                        camera_motion: card.querySelector(".motion-input").value,
+                        visual_type: card.querySelector(".visual-type-input").value
+                    })
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || `Could not save scene ${sceneId}.`);
+            }
+        }
+
+        // Save hook and ending when provided.
+        const storyboardText = {};
+
+        if (hookInput.value.trim()) {
+            storyboardText.hook = hookInput.value.trim();
+        }
+
+        if (endingInput.value.trim()) {
+            storyboardText.ending = endingInput.value.trim();
+        }
+
+        if (Object.keys(storyboardText).length) {
+            const response = await fetch(
+                `/api/projects/${projectId}/storyboard`,
+                {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(storyboardText)
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Could not save storyboard text.");
+            }
+        }
+
+        status.textContent = "Storyboard saved. Generating your video...";
+
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Generating...';
+
+        const response = await fetch(
+            `/api/projects/${projectId}/generate`,
+            {method: "POST"}
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Video generation failed.");
+        }
+
+        status.textContent =
+            `Video generated successfully! Output: ${data.result.output_video}`;
+
+        button.innerHTML = '<i class="fas fa-check me-2"></i>Generation Complete';
+
+    } catch (error) {
+        status.textContent = error.message;
+        status.style.color = "var(--danger)";
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-play me-2"></i>Generate Video';
+    }
+}
+
+document.getElementById("generateVideoBtn")
+    .addEventListener("click", generateVideo);
 function updateSceneCounts() {
     const count = sceneContainer.querySelectorAll(".scene-card").length;
     document.getElementById("storyboardSummary").textContent = `${count} scenes loaded`;

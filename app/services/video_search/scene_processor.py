@@ -184,22 +184,11 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 continue
 
             # AI-generated visuals need a separate provider.
+                        # AI-generated visuals: try Pixabay stock footage as a fallback.
             if visual_type == "ai_generated":
-                scene.status = "needs_visual"
-                scene.error_message = (
-                    "AI visual generation required."
-                )
+                scene.status = "processing"
+                scene.error_message = None
                 db.session.commit()
-
-                cleanup_old_asset(old_asset_path, project_id)
-
-                summary["needs_visual"] += 1
-                summary["results"].append({
-                    "scene_number": scene_number,
-                    "status": "needs_visual"
-                })
-
-                continue
 
             scene.status = "processing"
             scene.error_message = None
