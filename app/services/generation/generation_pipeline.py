@@ -20,7 +20,6 @@ from app.services.audio.subtitles import generate_word_timestamps
 from app.services.video_rendering.timeline_builder import build_timeline
 from app.services.video_rendering.video_renderer import render_video
 from app.services.video_rendering.subtitle_renderer import render_subtitles
-from app.services.audio.audio_mixer import mix_audio
 
 
 class GenerationAlreadyRunningError(RuntimeError):
@@ -233,7 +232,6 @@ def generate_project_video(project_id: int) -> dict:
     job_dir = storage_root / f"job_{job_id}"
 
     narration_path = job_dir / "narration.mp3"
-    mixed_audio_path = job_dir / "final_audio.mp3"
     silent_video_path = job_dir / "silent_video.mp4"
     final_video_path = job_dir / "final_reel.mp4"
     subtitle_path = job_dir / "subtitles.ass"
@@ -347,21 +345,8 @@ def generate_project_video(project_id: int) -> dict:
         if not timestamp_result.get("words"):
             raise RuntimeError("No word-level subtitle timestamps were generated.")
 
-        # 6. Mix narration with background music.
-        music_path = (
-            Path(current_app.root_path).parent
-            / "storage"
-            / "music"
-            / "fight34.mp3"
-        )
-
-        audio_result = mix_audio(
-            narration_path=str(actual_narration_path),
-            music_path=str(music_path),
-            output_path=str(mixed_audio_path),
-            music_volume=0.18,
-            voice_volume=1.0
-        )
+        # 6. Use narration directly as the final audio.
+        audio_path = str(actual_narration_path)
 
         update_progress(70)
 
@@ -385,7 +370,7 @@ def generate_project_video(project_id: int) -> dict:
         # 9. Burn subtitles and combine audio.
         subtitle_result = render_subtitles(
             video_path=str(silent_video_path),
-            audio_path=audio_result["output_path"],
+            audio_path=audio_path,
             words=timestamp_result["words"],
             output_path=str(final_video_path),
             subtitle_path=str(subtitle_path)
@@ -414,7 +399,6 @@ def generate_project_video(project_id: int) -> dict:
         # Remove intermediates after the completed video is safely recorded.
         for temporary_file in (
             actual_narration_path,
-            mixed_audio_path,
             silent_video_path,
             subtitle_path
         ):

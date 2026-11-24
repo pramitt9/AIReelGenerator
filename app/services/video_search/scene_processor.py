@@ -28,27 +28,8 @@ def clear_scene_asset(scene: Scene) -> None:
     scene.height = None
 
 
-def cleanup_old_asset(asset_path: str, project_id: int) -> None:
-    """Delete an obsolete asset without interrupting processing."""
-    if not asset_path:
-        return
-
-    try:
-        delete_video(asset_path, project_id)
-    except Exception:
-        # Cleanup failure must not invalidate successful processing.
-        pass
-
-
 def process_storyboard(project_id: int, storyboard: dict) -> dict:
-    """
-    Process storyboard scenes and obtain suitable visual assets.
-
-    Existing Pixabay footage is reused only when the visual description
-    and visual type are unchanged and the asset still exists.
-
-    AI-generated visuals are not silently replaced with stock footage.
-    """
+    """Process storyboard scenes and obtain visual assets."""
 
     if not isinstance(storyboard, dict):
         raise ValueError("Invalid storyboard format.")
@@ -67,39 +48,26 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         "results": []
     }
 
-    # Validate scene numbers before processing anything.
-    scene_numbers = []
+    seen_numbers = set()
 
     for index, scene_data in enumerate(scenes_data, start=1):
-        if not isinstance(scene_data, dict):
-            scene_numbers.append(None)
-            continue
-
-        scene_number = scene_data.get("scene_number", index)
+        scene_number = (
+            scene_data.get("scene_number", index)
+            if isinstance(scene_data, dict)
+            else None
+        )
 
         if (
             not isinstance(scene_number, int)
             or isinstance(scene_number, bool)
             or scene_number < 1
+            or scene_number in seen_numbers
         ):
-            scene_numbers.append(None)
-        else:
-            scene_numbers.append(scene_number)
+            raise ValueError(
+                "Storyboard contains invalid or duplicate scene numbers."
+            )
 
-    valid_numbers = [
-        number for number in scene_numbers if number is not None
-    ]
-
-    if (
-        len(valid_numbers) != len(scene_numbers)
-        or len(valid_numbers) != len(set(valid_numbers))
-    ):
-        raise ValueError(
-            "Storyboard contains invalid or duplicate scene numbers."
-        )
-
-    for index, scene_data in enumerate(scenes_data, start=1):
-        scene_number = scene_numbers[index - 1]
+        seen_numbers.add(scene_number)
 
         narration = scene_data.get("narration", "")
         visual_description = scene_data.get("visual_description", "")
@@ -107,25 +75,19 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
         visual_type = scene_data.get("visual_type", "stock_video")
         camera_motion = scene_data.get("camera_motion", "none")
 
-        if not isinstance(narration, str):
-            narration = ""
-
-        if not isinstance(visual_description, str):
-            visual_description = ""
-
-        narration = narration.strip()
-        visual_description = visual_description.strip()
-
         try:
             duration = float(duration)
         except (TypeError, ValueError):
             duration = 0
 
         if (
-            not narration
-            or not visual_description
+            not isinstance(narration, str)
+            or not narration.strip()
+            or not isinstance(visual_description, str)
+            or not visual_description.strip()
             or not math.isfinite(duration)
-            or not 1 <= duration <= 30
+            or duration < 3
+            or duration > 8
             or visual_type not in ALLOWED_VISUAL_TYPES
             or camera_motion not in ALLOWED_MOTIONS
         ):
@@ -133,7 +95,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             summary["results"].append({
                 "scene_number": scene_number,
                 "status": "failed",
-                "error": "Missing or invalid scene information."
+                "error": "Invalid scene information."
             })
             continue
 
@@ -155,8 +117,8 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                     old_asset_path = scene.asset_path
                     clear_scene_asset(scene)
 
-                scene.narration = narration
-                scene.visual_description = visual_description
+                scene.narration = narration.strip()
+                scene.visual_description = visual_description.strip()
                 scene.visual_type = visual_type
                 scene.duration = duration
                 scene.camera_motion = camera_motion
@@ -165,42 +127,18 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 scene = Scene(
                     project_id=project_id,
                     scene_number=scene_number,
-                    narration=narration,
-                    visual_description=visual_description,
+                    narration=narration.strip(),
+                    visual_description=visual_description.strip(),
                     visual_type=visual_type,
                     duration=duration,
-                    status="pending",
-                    camera_motion=camera_motion
+                    camera_motion=camera_motion,
+                    status="pending"
                 )
                 db.session.add(scene)
 
             db.session.commit()
 
-            # AI-generated visuals require a real image/video provider.
-            # Do not silently substitute Pixabay footage.
-            if visual_type == "ai_generated":
-                if scene.asset_path:
-                    old_asset_path = scene.asset_path
-                    clear_scene_asset(scene)
-
-                scene.status = "needs_visual"
-                scene.error_message = (
-                    "AI-generated visuals are not configured yet. "
-                    "Change this scene to Stock Video to continue."
-                )
-                db.session.commit()
-
-                cleanup_old_asset(old_asset_path, project_id)
-
-                summary["needs_visual"] += 1
-                summary["results"].append({
-                    "scene_number": scene_number,
-                    "status": "needs_visual",
-                    "error": scene.error_message
-                })
-                continue
-
-            # Reuse valid existing stock footage.
+            # Reuse existing footage if the file is still available.
             if (
                 scene.provider == "pixabay"
                 and scene.asset_path
@@ -219,7 +157,6 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 })
                 continue
 
-            # Preserve the old path for cleanup if its file is missing.
             if scene.asset_path:
                 old_asset_path = scene.asset_path
                 clear_scene_asset(scene)
@@ -228,18 +165,24 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             scene.error_message = None
             db.session.commit()
 
-            # Search Pixabay for stock footage.
-            videos = search_videos(
-                visual_description,
-                per_page=10
-            )
+            # AI-generated scenes fall back to stock footage.
+            query = visual_description.strip()
+
+            if visual_type == "ai_generated":
+                query = f"{query} cinematic video"
+
+            videos = search_videos(query)
 
             if not videos:
                 scene.status = "needs_visual"
-                scene.error_message = "No matching stock footage found."
+                scene.error_message = (
+                    "No matching Pixabay footage found. "
+                    "Try a simpler visual description."
+                )
                 db.session.commit()
 
-                cleanup_old_asset(old_asset_path, project_id)
+                if old_asset_path:
+                    delete_video(old_asset_path, project_id)
 
                 summary["needs_visual"] += 1
                 summary["results"].append({
@@ -257,10 +200,11 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
             if not best or not best.get("url"):
                 scene.status = "needs_visual"
-                scene.error_message = "No suitable footage was found."
+                scene.error_message = "No suitable Pixabay footage found."
                 db.session.commit()
 
-                cleanup_old_asset(old_asset_path, project_id)
+                if old_asset_path:
+                    delete_video(old_asset_path, project_id)
 
                 summary["needs_visual"] += 1
                 summary["results"].append({
@@ -270,7 +214,6 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
                 })
                 continue
 
-            # Download using the stable database scene ID.
             asset_path = download_video(
                 best["url"],
                 project_id=project_id,
@@ -278,9 +221,7 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             )
 
             if not asset_path or not os.path.isfile(asset_path):
-                raise RuntimeError(
-                    "Downloaded footage could not be found."
-                )
+                raise RuntimeError("Downloaded video file is missing.")
 
             scene.provider = "pixabay"
             scene.provider_video_id = str(best.get("video_id", ""))
@@ -295,13 +236,12 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
             db.session.commit()
 
             if old_asset_path and old_asset_path != asset_path:
-                cleanup_old_asset(old_asset_path, project_id)
+                delete_video(old_asset_path, project_id)
 
             summary["completed"] += 1
             summary["results"].append({
                 "scene_number": scene_number,
                 "status": "completed",
-                "video_id": best.get("video_id"),
                 "asset_path": asset_path,
                 "reused": False
             })
@@ -322,8 +262,6 @@ def process_storyboard(project_id: int, storyboard: dict) -> dict:
 
             except Exception:
                 db.session.rollback()
-
-            cleanup_old_asset(old_asset_path, project_id)
 
             summary["failed"] += 1
             summary["results"].append({
