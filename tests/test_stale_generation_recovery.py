@@ -1,4 +1,4 @@
-﻿import os
+import os
 import socket
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,7 +19,7 @@ app = create_app({
 })
 
 
-def main():
+def test_stale_generation_recovery():
     with TemporaryDirectory() as temp_dir:
         with app.app_context():
             db.create_all()
@@ -147,6 +147,3 @@ def main():
                 db.drop_all()
                 db.session.remove()
 
-
-if __name__ == "__main__":
-    main()

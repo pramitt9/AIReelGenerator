@@ -13,7 +13,7 @@ app = create_app({
 })
 
 
-def main():
+def test_generation_route():
     with app.app_context():
         db.create_all()
 
@@ -87,6 +87,3 @@ def main():
             db.drop_all()
             db.session.remove()
 
-
-if __name__ == "__main__":
-    main()

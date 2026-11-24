@@ -154,7 +154,7 @@ def fake_render_subtitles(
     }
 
 
-def main():
+def test_generation_pipeline():
     # Keep the temporary directory alive for the entire test.
     with TemporaryDirectory() as temp_dir:
         app.root_path = str(Path(temp_dir) / "app")
@@ -313,6 +313,3 @@ def main():
                 db.drop_all()
                 db.session.remove()
 
-
-if __name__ == "__main__":
-    main()
