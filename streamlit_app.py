@@ -20,6 +20,9 @@ for key in [
     except Exception:
         pass
 
+if not os.environ.get("SECRET_KEY"):
+    os.environ["SECRET_KEY"] = secrets.token_hex(32)
+
 os.environ["FLASK_ENV"] = "production"
 
 from app import create_app
