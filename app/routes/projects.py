@@ -2,6 +2,7 @@
 import json
 import shutil
 from pathlib import Path
+from app.services.cloud.aws_queue import enqueue_generation
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
@@ -535,7 +536,6 @@ def generate_project_script(project_id):
 # ---------------------------------------------------------
 # Generate video
 # ---------------------------------------------------------
-
 @projects.route("/<int:project_id>/generate", methods=["POST"])
 @login_required
 def generate_project(project_id):
@@ -561,30 +561,24 @@ def generate_project(project_id):
         }), 409
 
     try:
-        result = generate_project_video(project_id)
+        message_id = enqueue_generation(project_id)
 
         return jsonify({
-            "message": "Video generated successfully.",
-            "result": result
-        }), 200
-
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    except GenerationAlreadyRunningError as exc:
-        return jsonify({"error": str(exc)}), 409
+            "message": "Video generation queued successfully.",
+            "project_id": project_id,
+            "message_id": message_id,
+            "status": "queued"
+        }), 202
 
     except Exception:
         current_app.logger.exception(
-            "Video generation failed for project %s",
+            "Could not queue generation for project %s",
             project_id
         )
 
         return jsonify({
-            "error": "Video generation failed. Check the generation job for details."
+            "error": "Could not queue video generation."
         }), 500
-
-
 # ---------------------------------------------------------
 # Update individual scene
 # ---------------------------------------------------------

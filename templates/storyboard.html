@@ -315,6 +315,7 @@ function showSuccess(message) {
     globalError.textContent = "";
     globalSuccess.textContent = message || "";
 }
+
 async function generateVideo() {
     const button = document.getElementById("generateVideoBtn");
     const status = document.getElementById("generationStatus");
@@ -324,6 +325,7 @@ async function generateVideo() {
     }
 
     button.disabled = true;
+    status.style.color = "";
     status.textContent = "Saving storyboard changes...";
     showError("");
 
@@ -356,7 +358,7 @@ async function generateVideo() {
             }
         }
 
-        // Save hook and ending when provided.
+        // Save hook and ending.
         const storyboardText = {};
 
         if (hookInput.value.trim()) {
@@ -384,9 +386,9 @@ async function generateVideo() {
             }
         }
 
-        status.textContent = "Storyboard saved. Generating your video...";
+        status.textContent = "Storyboard saved. Sending generation request...";
 
-        button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Generating...';
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Queuing...';
 
         const response = await fetch(
             `/api/projects/${projectId}/generate`,
@@ -396,17 +398,22 @@ async function generateVideo() {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error || "Video generation failed.");
+            throw new Error(data.error || "Could not queue video generation.");
         }
 
-        status.textContent =
-            `Video generated successfully! Output: ${data.result.output_video}`;
+        if (response.status === 202 && data.status === "queued") {
+            status.style.color = "var(--success)";
+            status.textContent =
+                "Generation successfully queued! Your AWS worker is processing the video. Refresh this page after generation completes.";
 
-        button.innerHTML = '<i class="fas fa-check me-2"></i>Generation Complete';
+            button.innerHTML = '<i class="fas fa-check me-2"></i>Generation Queued';
+            return;
+        }
 
-        window.location.reload();
+        throw new Error("Unexpected response from generation server.");
 
     } catch (error) {
+        console.error("Generation request failed:", error);
         status.textContent = error.message;
         status.style.color = "var(--danger)";
         button.disabled = false;

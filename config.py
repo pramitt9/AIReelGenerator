@@ -9,6 +9,9 @@ class Config:
 
     ENV = os.getenv("FLASK_ENV", "development").strip().lower()
     DEBUG = os.getenv("FLASK_DEBUG", "False").strip().lower() == "true"
+    AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+    SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 
     SECRET_KEY = os.getenv("SECRET_KEY")
     if not SECRET_KEY:

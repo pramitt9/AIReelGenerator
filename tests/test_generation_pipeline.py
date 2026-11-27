@@ -197,10 +197,7 @@ def test_generation_pipeline():
                         "app.services.generation.generation_pipeline.generate_word_timestamps",
                         return_value=mock_timestamps
                     ),
-                    patch(
-                        "app.services.generation.generation_pipeline.mix_audio",
-                        side_effect=fake_mix_audio
-                    ),
+                    
                     patch(
                         "app.services.generation.generation_pipeline.render_video",
                         side_effect=[
